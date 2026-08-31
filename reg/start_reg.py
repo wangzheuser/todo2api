@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 import subprocess
@@ -29,12 +28,8 @@ def save_settings(settings: dict, path: Path = SETTINGS_FILE) -> None:
     temporary.replace(path)
 
 
-def prompt_text(label: str, current: str, *, secret: bool = False) -> str:
-    if secret:
-        prompt = f"{label} [{'已保存，回车复用' if current else '必填'}]: "
-        value = getpass.getpass(prompt).strip()
-    else:
-        value = input(f"{label} [{current}]: ").strip()
+def prompt_text(label: str, current: str) -> str:
+    value = input(f"{label} [{current}]: ").strip()
     return value or current
 
 
@@ -98,7 +93,7 @@ def main() -> int:
     )
     settings["proxy_url"] = prompt_text("Resin 代理 URL", str(settings["proxy_url"]))
     settings["mailpoolhub_api_key"] = prompt_text(
-        "MailPoolHub API Key", str(settings["mailpoolhub_api_key"]), secret=True
+        "MailPoolHub API Key", str(settings["mailpoolhub_api_key"])
     )
 
     if not settings["mailpoolhub_api_key"]:
