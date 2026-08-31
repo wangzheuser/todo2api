@@ -1,0 +1,18 @@
+MODIFIED_FILE adds a resumable single-key model probe against the current local todo2api gateway.
+
+Changed branch:
+- Query the authenticated /v1/models catalog.
+- Skip models already recorded as successful.
+- Call /v1/chat/completions once per remaining model.
+- Persist every result immediately and stop if the sole account enters HTTP 503 cooldown.
+
+Changed fields:
+- model
+- status
+- http_status
+- latency_seconds
+- response_preview
+- declared_context
+- declared_max_completion
+
+No raw upstream API key is written to the script, JSON results, or report.
