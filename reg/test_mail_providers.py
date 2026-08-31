@@ -409,6 +409,13 @@ class RegistrationFlowTest(unittest.TestCase):
             start_reg.save_settings(settings, path)
             self.assertEqual(settings, start_reg.load_settings(path))
 
+    def test_windows_launcher_is_ascii_crlf(self) -> None:
+        """防止 cmd.exe 将 UTF-8/LF 批处理错误解析为残缺命令。"""
+        data = Path(start_reg.__file__).with_name("start_reg.bat").read_bytes()
+        data.decode("ascii")
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+        self.assertIn(b'python "%~dp0start_reg.py"\r\n', data)
+
     def test_factory_returns_independent_mailpoolhub_sessions(self) -> None:
         """验证并发任务不会共享 requests.Session。"""
         factory, label = main.create_mail_provider_factory(

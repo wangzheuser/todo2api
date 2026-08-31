@@ -1,16 +1,15 @@
 @echo off
 setlocal
-chcp 65001 >nul
 cd /d "%~dp0"
 where python >nul 2>&1
 if errorlevel 1 (
-  echo 未找到 Python，请先安装 Python 3.11 或更高版本。
+  echo Python 3.11 or newer is required.
   pause
   exit /b 1
 )
 python "%~dp0start_reg.py"
-set "code=%errorlevel%"
-echo.
-if not "%code%"=="0" echo 启动器退出码：%code%
+set "exit_code=%errorlevel%"
+echo(
+if not "%exit_code%"=="0" echo Launcher exit code: %exit_code%
 pause
-exit /b %code%
+exit /b %exit_code%
