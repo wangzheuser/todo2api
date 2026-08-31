@@ -383,6 +383,31 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(proxies["http"], proxies["https"])
         self.assertNotIn("{uuid}", proxies["http"])
 
+    def test_resin_proxy_shorthand_is_normalized(self) -> None:
+        """验证启动器历史保存的 Resin 简写能转换成标准代理 URL。"""
+        shorthand = "http://node.{uuid}:fixture-token:9200"
+        normalized = main.normalize_proxy_url(shorthand)
+        self.assertEqual(
+            "http://node.{uuid}:fixture-token@127.0.0.1:9200",
+            normalized,
+        )
+        resolved = main.resolve_proxy_templates({"https": shorthand})["https"]
+        parsed = main.urlparse(resolved)
+        self.assertTrue(parsed.username.startswith("node."))
+        self.assertEqual("fixture-token", parsed.password)
+        self.assertEqual("127.0.0.1", parsed.hostname)
+        self.assertEqual(9200, parsed.port)
+
+    def test_standard_proxy_url_is_unchanged(self) -> None:
+        """验证标准代理 URL 不被重复改写。"""
+        proxy = "http://node.{uuid}:fixture-token@127.0.0.1:9200"
+        self.assertEqual(proxy, main.normalize_proxy_url(proxy))
+
+    def test_invalid_proxy_url_is_rejected(self) -> None:
+        """验证无法识别的代理配置会在批量任务启动前失败。"""
+        with self.assertRaisesRegex(ValueError, "代理 URL 无效"):
+            main.normalize_proxy_url("http://missing-port")
+
     def test_interactive_launcher_builds_expected_command(self) -> None:
         """验证交互启动器完整传递批量注册关键参数。"""
         command = start_reg.build_command(

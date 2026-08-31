@@ -27,6 +27,7 @@ import json
 import time
 import threading
 import argparse
+import re
 import traceback
 import requests
 from pathlib import Path
@@ -60,13 +61,41 @@ FILE_LOCK = threading.Lock()
 PRINT_LOCK = threading.Lock()
 
 
+def normalize_proxy_url(proxy_url: str) -> str:
+    """兼容 Resin 的 ``scheme://platform.account:token:port`` 简写。"""
+    value = str(proxy_url or "").strip()
+    parsed = urlparse(value)
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if parsed.scheme in {"http", "https", "socks5"} and parsed.hostname and port:
+        return value
+
+    shorthand = re.fullmatch(
+        r"(?P<scheme>https?|socks5)://(?P<username>[^:/@]+):(?P<password>[^:/@]+):(?P<port>\d+)",
+        value,
+    )
+    if shorthand:
+        port = int(shorthand.group("port"))
+        if 1 <= port <= 65535:
+            return (
+                f"{shorthand.group('scheme')}://{shorthand.group('username')}:"
+                f"{shorthand.group('password')}@127.0.0.1:{port}"
+            )
+    raise ValueError(
+        "代理 URL 无效；请使用 http://用户:密码@主机:端口，"
+        "或 Resin 简写 http://平台.{uuid}:口令:端口"
+    )
+
+
 def resolve_proxy_templates(proxies: dict | None) -> dict | None:
     """为单次注册解析共享的 Resin 粘性会话 UUID。"""
     if not proxies:
         return None
     session_id = uuid4().hex
     return {
-        key: value.replace("{uuid}", session_id)
+        key: normalize_proxy_url(value).replace("{uuid}", session_id)
         for key, value in proxies.items()
     }
 
@@ -820,6 +849,12 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     elif isinstance(proxy_cfg, dict) and proxy_cfg:
         # 支持 "http": "http://host:port" 格式
         proxies = {k: v for k, v in proxy_cfg.items() if v and isinstance(v, str)} or None
+    if proxies:
+        try:
+            proxies = {key: normalize_proxy_url(value) for key, value in proxies.items()}
+        except ValueError as error:
+            print(f"❌ 代理配置错误：{error}")
+            sys.exit(1)
 
     turnstile_cfg = cfg.get("turnstile") if isinstance(cfg.get("turnstile"), dict) else {}
     turnstile_solver = None
