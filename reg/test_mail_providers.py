@@ -361,6 +361,24 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(2, provider.create_count)
 
+    def test_save_result_appends_to_existing_key_file(self) -> None:
+        """验证新一轮注册不会覆盖之前保存的 API Key。"""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            output.write_text("existing-api-key\n", encoding="utf-8")
+            with patch.object(main, "OUTPUT_FILE", output):
+                main.save_result(
+                    {
+                        "thread_id": 1,
+                        "api_keys": [{"key": "new-api-key-value"}],
+                        "default_key": None,
+                    }
+                )
+            self.assertEqual(
+                ["existing-api-key", "new-api-key-value"],
+                output.read_text(encoding="utf-8").splitlines(),
+            )
+
     def test_send_otp_preserves_business_error(self) -> None:
         """验证 OTP 接口错误码和错误消息会传递给注册流程。"""
         todo = main.TodoforAI()

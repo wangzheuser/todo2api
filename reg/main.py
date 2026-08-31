@@ -967,7 +967,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     # ── 准备 ──
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_FILE.write_text("")  # 清空旧结果
 
     print(f"{'=' * 55}")
     print(f"  Todofor.ai 批量注册机")
