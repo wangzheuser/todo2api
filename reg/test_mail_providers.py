@@ -226,6 +226,34 @@ class MailPoolHubProviderTest(unittest.TestCase):
         provider.close_account(account)
         self.assertEqual("fixture", MailPoolHubContractHandler.last_create_payload["provider"])
 
+    def test_excluded_mailbox_domain_is_deleted_and_retried(self) -> None:
+        """验证 MailPoolHub 客户端会跳过持久黑名单域名。"""
+        provider = MailPoolHubProvider(
+            base_url=self.base_url,
+            api_key="local-test-token",
+            provider_name="fixture",
+        )
+        created = iter(
+            [
+                {"id": "blocked", "address": "first@blocked.test"},
+                {"id": "allowed", "address": "second@allowed.test"},
+            ]
+        )
+        deleted: list[str] = []
+
+        def request(method: str, pathname: str, **_kwargs) -> dict:
+            if method == "POST":
+                return next(created)
+            if method == "DELETE":
+                deleted.append(pathname)
+                return {"success": True}
+            raise AssertionError((method, pathname))
+
+        with patch.object(provider, "_request_json", side_effect=request):
+            account = provider.create_account(exclude_domains=["blocked.test"])
+        self.assertEqual("second@allowed.test", account["address"])
+        self.assertEqual(["/mailboxes/blocked"], deleted)
+
 
 class VerificationCodeTest(unittest.TestCase):
     """验证码字段与正文兜底提取测试。"""
@@ -257,7 +285,9 @@ class RegistrationFlowTest(unittest.TestCase):
         """验证主流程读取完整邮箱账户并在成功后删除邮箱。"""
         provider = _FakeMailProvider()
 
-        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(main.time, "sleep"):
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            main, "load_rejected_domains", return_value=set()
+        ), patch.object(main.time, "sleep"):
             result = main.process_one_account(
                 1,
                 lambda: provider,
@@ -379,6 +409,53 @@ class RegistrationFlowTest(unittest.TestCase):
                 output.read_text(encoding="utf-8").splitlines(),
             )
 
+    def test_rejected_domain_file_appends_once(self) -> None:
+        """验证明确拒绝域名会持久化且自动去重。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rejected_domains.txt"
+            with patch.object(main, "REJECTED_DOMAINS_FILE", path):
+                self.assertTrue(main.record_rejected_domain("Blocked.Test"))
+                self.assertFalse(main.record_rejected_domain("blocked.test"))
+                self.assertEqual({"blocked.test"}, main.load_rejected_domains())
+
+    def test_temporary_email_rejection_is_persisted_before_retry(self) -> None:
+        """验证目标拒绝后，重试创建邮箱时已带上持久黑名单。"""
+        provider = _FakeMailProvider()
+        addresses = iter(["first@blocked.test", "second@allowed.test"])
+        seen_exclusions: list[set[str]] = []
+
+        def create_account(
+            domain: str = "", exclude_domains: list[str] | None = None
+        ) -> dict:
+            address = next(addresses)
+            seen_exclusions.append(set(exclude_domains or []))
+            return {"id": address, "address": address, "domain": address.rsplit("@", 1)[-1]}
+
+        provider.create_account = create_account
+
+        class RejectOnce(_FakeTodoforAI):
+            attempts = 0
+
+            def send_otp(self, email: str, captcha_token: str = "") -> bool:
+                type(self).attempts += 1
+                if type(self).attempts == 1:
+                    self.last_otp_error_code = "HTTP_400"
+                    self.last_otp_error_message = "Temporary email addresses are not allowed."
+                    self.last_otp_status = 400
+                    return False
+                return True
+
+            def verify_otp(self, email: str, otp: str) -> dict | None:
+                return super().verify_otp("fixture@mail.test", otp)
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            main, "REJECTED_DOMAINS_FILE", Path(directory) / "rejected_domains.txt"
+        ), patch.object(main, "TodoforAI", RejectOnce), patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, lambda: provider, max_retries=2)
+
+        self.assertIsNotNone(result)
+        self.assertIn("blocked.test", seen_exclusions[1])
+
     def test_send_otp_preserves_business_error(self) -> None:
         """验证 OTP 接口错误码和错误消息会传递给注册流程。"""
         todo = main.TodoforAI()
@@ -467,6 +544,30 @@ class RegistrationFlowTest(unittest.TestCase):
             start_reg.save_settings(settings, path)
             self.assertEqual(settings, start_reg.load_settings(path))
 
+    def test_stale_saved_provider_defaults_to_random(self) -> None:
+        """验证旧渠道不在成功清单时回车会切换为随机。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "working.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "channels": [
+                            {
+                                "provider": "verified",
+                                "attempts": 10,
+                                "successes": 8,
+                                "domains": [{"domain": "mail.test", "successes": 8}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(start_reg, "WORKING_CHANNELS_FILE", path), patch(
+                "builtins.input", return_value=""
+            ):
+                self.assertEqual("random", start_reg.prompt_mail_provider("removed"))
+
     def test_interactive_launcher_force_stops_child_on_ctrl_c(self) -> None:
         """验证 Ctrl+C 会终止注册及浏览器进程树并返回 130。"""
         process = Mock()
@@ -509,8 +610,8 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIsNot(first.session, second.session)
         self.assertFalse(first.session.trust_env)
-        self.assertEqual(0, first.provider_cursor)
-        self.assertEqual(0, second.provider_cursor)
+        self.assertLess(first.provider_cursor, len(first.provider_names))
+        self.assertLess(second.provider_cursor, len(second.provider_names))
 
     def test_factory_accepts_mailpoolhub_provider_override(self) -> None:
         """验证启动器可固定到已经实测成功的下游渠道。"""

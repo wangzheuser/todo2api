@@ -1,0 +1,143 @@
+diff --git "a/D:\\projects\\github\\todo2api\\work\\rejected-domain-persistence\\ORIGINAL_FILE" "b/D:\\projects\\github\\todo2api\\work\\rejected-domain-persistence\\MODIFIED_FILE"
+index 3f88588..7a6a630 100644
+--- "a/D:\\projects\\github\\todo2api\\work\\rejected-domain-persistence\\ORIGINAL_FILE"
++++ "b/D:\\projects\\github\\todo2api\\work\\rejected-domain-persistence\\MODIFIED_FILE"
+@@ -28,6 +28,7 @@ import time
+ import threading
+ import argparse
+ import re
++import secrets
+ import traceback
+ import requests
+ from pathlib import Path
+@@ -58,10 +59,54 @@ MAILPOOLHUB_REGISTRATION_PROVIDERS = (
+ SCRIPT_DIR = Path(__file__).resolve().parent
+ DEFAULT_CONFIG_FILE = SCRIPT_DIR / "config.json"
+ OUTPUT_FILE = SCRIPT_DIR / "get_apikey.txt"
++REJECTED_DOMAINS_FILE = SCRIPT_DIR / "rejected_domains.txt"
++WORKING_MAIL_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
+
+ # 线程安全锁
+ FILE_LOCK = threading.Lock()
+ PRINT_LOCK = threading.Lock()
++REJECTED_DOMAIN_LOCK = threading.Lock()
++
++
++def load_rejected_domains() -> set[str]:
++    """读取目标业务已明确拒绝的邮箱域名。"""
++    try:
++        return {
++            line.strip().casefold()
++            for line in REJECTED_DOMAINS_FILE.read_text(encoding="utf-8").splitlines()
++            if line.strip() and not line.lstrip().startswith("#")
++        }
++    except OSError:
++        return set()
++
++
++def record_rejected_domain(domain: str) -> bool:
++    """将明确拒绝的域名去重追加到持久黑名单。"""
++    normalized = str(domain or "").strip().casefold()
++    if not normalized:
++        return False
++    with REJECTED_DOMAIN_LOCK:
++        if normalized in load_rejected_domains():
++            return False
++        with open(REJECTED_DOMAINS_FILE, "a", encoding="utf-8") as output:
++            output.write(f"{normalized}\n")
++    return True
++
++
++def load_working_mail_channels() -> list[dict]:
++    """读取完成实测并至少成功一次的 MailPoolHub 渠道。"""
++    try:
++        body = json.loads(WORKING_MAIL_CHANNELS_FILE.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError):
++        return []
++    channels = body.get("channels") if isinstance(body, dict) else None
++    if not isinstance(channels, list):
++        return []
++    return [
++        channel
++        for channel in channels
++        if isinstance(channel, dict) and str(channel.get("provider") or "").strip()
++    ]
+
+
+ def normalize_proxy_url(proxy_url: str) -> str:
+@@ -285,10 +330,18 @@ def create_mail_provider_factory(
+         forced_provider_name = str(mailpoolhub_provider_name or mailpoolhub_cfg.get("provider") or "")
+         configured_provider_names = mailpoolhub_cfg.get("providers")
+         if not isinstance(configured_provider_names, list):
+-            configured_provider_names = list(MAILPOOLHUB_REGISTRATION_PROVIDERS)
+-        provider_names = list(configured_provider_names)
+-        if forced_provider_name and forced_provider_name.lower() != "auto":
+-            provider_names.insert(0, forced_provider_name)
++            tested_names = [
++                str(channel["provider"]).strip()
++                for channel in load_working_mail_channels()
++            ]
++            configured_provider_names = tested_names or list(MAILPOOLHUB_REGISTRATION_PROVIDERS)
++        mode = forced_provider_name.lower()
++        random_mode = mode in {"", "auto", "random"}
++        provider_names = (
++            list(configured_provider_names)
++            if random_mode
++            else [forced_provider_name]
++        )
+
+         def create_mailpoolhub_provider() -> TemporaryMailProvider:
+             """为单个注册任务创建独立 MailPoolHub Session。"""
+@@ -300,6 +353,12 @@ def create_mail_provider_factory(
+                 ttl_seconds=ttl_seconds,
+                 provider_name=forced_provider_name,
+                 provider_names=provider_names,
++                provider_start=(
++                    secrets.randbelow(len(provider_names))
++                    if random_mode and provider_names
++                    else 0
++                ),
++                allow_provider_fallback=False,
+             )
+
+         return create_mailpoolhub_provider, f"MailPoolHub ({str(base_url).rstrip('/')})"
+@@ -638,7 +697,9 @@ def process_one_account(
+                 raise last_session_error or requests.RequestException("匿名会话初始化失败")
+
+             # ── 1. 创建临时邮箱 ──
+-            current_exclude = (exclude_domains or []) + failed_domains
++            current_exclude = sorted(
++                set(exclude_domains or []) | set(failed_domains) | load_rejected_domains()
++            )
+             log(thread_id, f"📧 创建临时邮箱... (尝试 {attempt}/{max_retries})")
+             account = mail_provider.create_account(
+                 domain=domain,
+@@ -669,9 +730,19 @@ def process_one_account(
+
+                 # 浏览器校验和临时邮箱策略不会因更换域名或会话而消失。
+                 normalized_message = error_message.casefold()
++                if "temporary email" in normalized_message:
++                    if record_rejected_domain(used_domain):
++                        log(thread_id, f"   已记录拒绝域名: {used_domain}")
++                    failed_domains.append(used_domain)
++                    if attempt < max_retries:
++                        log(thread_id, "   自动排除该域名并重试...")
++                        time.sleep(min(2 ** (attempt - 1), 10))
++                        continue
++                    return None
++
+                 non_retryable = error_code in {"CAPTCHA_REQUIRED"} or any(
+                     text in normalized_message
+-                    for text in ("temporary email", "browser verification", "captcha")
++                    for text in ("browser verification", "captcha")
+                 )
+                 if non_retryable:
+                     if error_code == "CAPTCHA_REQUIRED" and turnstile_solver and attempt < max_retries:
+@@ -874,6 +945,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默
+     exclude_domains: list[str] = cfg.get("exclude_domains", [])
+     if not isinstance(exclude_domains, list):
+         exclude_domains = []
++    exclude_domains = sorted(set(exclude_domains) | load_rejected_domains())
+
+     # ── 解析代理配置 ──
+     proxy_cfg = cfg.get("proxy", {})

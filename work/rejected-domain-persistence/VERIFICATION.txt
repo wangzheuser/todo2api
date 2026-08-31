@@ -1,0 +1,36 @@
+CHANGED_BRANCH: dev
+CHANGED_FIELD: MailPoolHub rejected-domain persistence, automatic exclusion/retry, and tested-provider random selection
+
+ARTIFACTS:
+MODIFIED_FILE: D:/projects/github/todo2api/work/rejected-domain-persistence/MODIFIED_FILE
+DIFF_FILE: D:/projects/github/todo2api/work/rejected-domain-persistence/DIFF_FILE
+VERIFICATION.txt: D:/projects/github/todo2api/work/rejected-domain-persistence/VERIFICATION.txt
+ROLLBACK.sh: D:/projects/github/todo2api/work/rejected-domain-persistence/ROLLBACK.sh
+
+ORIGINAL_SHA256: e53fd1001e9b4325726aeee7acdbadc0250a5f465b1994a30bfd9260bfbef9ee
+MODIFIED_SHA256: 92c2c849196eed4a06ac3410c56b1b36b6524544a5b23633a3229abd28975a57
+
+BASELINE:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py && python -m unittest test_mail_providers.py
+INPUT: HEAD archive 423547c, work/rejected-domain-persistence/baseline/reg
+LITERAL_OUTPUT_RESULT: Ran 28 tests in 1.605s / OK / BASELINE_COMPILE_EXIT=0 / BASELINE_TEST_EXIT=0
+EXIT_STATUS: 0
+
+MODIFIED:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py && python -m unittest test_mail_providers.py
+INPUT: current reg/main.py, reg/mail_providers.py, reg/start_reg.py, reg/test_mail_providers.py
+LITERAL_OUTPUT_RESULT: Ran 32 tests in 1.606s / OK
+EXIT_STATUS: 0
+
+LIVE:
+COMMAND: python main.py --mail-provider mailpoolhub --mailpoolhub-provider random --max-retries 5 --turnstile-concurrency 1 --count 1 --threads 1 (base URL, proxy, and API key loaded from ignored local settings without echo)
+INPUT: working_mail_channels.json with 5 tested providers; rejected_domains.txt with 38 domains; get_apikey.txt with 10 lines
+LITERAL_OUTPUT_RESULT: provider attempts mailistry -> HTTP 429, throwawaymail -> HTTP 429, zeppost -> HTTP 429, mailforspam -> OTP received -> login successful -> 1 API key appended; APIKEY_LINES_AFTER=11; REG_EXIT=0
+EXIT_STATUS: 0
+
+ROLLBACK:
+COMMAND: C:/Program Files/Git/bin/bash.exe -lc "ROLLBACK.sh ROLLBACK_TEST_FILE"
+INPUT: ROLLBACK_TEST_FILE copied from MODIFIED_FILE, SHA256 92c2c849196eed4a06ac3410c56b1b36b6524544a5b23633a3229abd28975a57
+LITERAL_OUTPUT_RESULT: e53fd1001e9b4325726aeee7acdbadc0250a5f465b1994a30bfd9260bfbef9ee *ROLLBACK_TEST_FILE / ROLLBACK_EXIT=0
+EXIT_STATUS: 0
+RESTORED_BEHAVIOR_STATUS: rollback test copy matches the original HEAD main.py hash; MODIFIED_FILE remains changed with SHA256 92c2c849196eed4a06ac3410c56b1b36b6524544a5b23633a3229abd28975a57.

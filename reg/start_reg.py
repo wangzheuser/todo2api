@@ -12,6 +12,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = SCRIPT_DIR / "start_reg.settings.json"
+WORKING_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
 
 
 def load_settings(path: Path = SETTINGS_FILE) -> dict:
@@ -43,6 +44,47 @@ def prompt_int(label: str, current: int, *, minimum: int = 1) -> int:
         except ValueError:
             pass
         print(f"请输入不小于 {minimum} 的整数")
+
+
+def load_working_channels(path: Path | None = None) -> list[dict]:
+    path = path or WORKING_CHANNELS_FILE
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    channels = body.get("channels") if isinstance(body, dict) else None
+    return channels if isinstance(channels, list) else []
+
+
+def prompt_mail_provider(current: str) -> str:
+    channels = load_working_channels()
+    providers = [str(item.get("provider") or "") for item in channels if item.get("provider")]
+    if not providers:
+        return prompt_text("MailPoolHub 邮箱渠道", current or "auto")
+    default = current if current == "random" or current in providers else "random"
+    print("\n已实测可用邮箱渠道：")
+    print("  0. random（默认，每个账号随机）")
+    for index, item in enumerate(channels, 1):
+        domains = ", ".join(
+            str(domain.get("domain") or "")
+            for domain in item.get("domains") or []
+        )
+        print(
+            f"  {index}. {item['provider']} "
+            f"({item.get('successes', 0)}/{item.get('attempts', 0)})"
+            + (f" [{domains}]" if domains else "")
+        )
+    while True:
+        value = input(f"选择邮箱渠道 [{default}]: ").strip()
+        if not value:
+            return default
+        if value in {"0", "random"}:
+            return "random"
+        if value.isdigit() and 1 <= int(value) <= len(providers):
+            return providers[int(value) - 1]
+        if value in providers:
+            return value
+        print("请输入列表编号、渠道名或直接回车")
 
 
 def build_command(settings: dict) -> list[str]:
@@ -126,8 +168,8 @@ def main() -> int:
     settings["mailpoolhub_base_url"] = prompt_text(
         "MailPoolHub API 地址", str(settings["mailpoolhub_base_url"])
     )
-    settings["mailpoolhub_provider"] = prompt_text(
-        "MailPoolHub 邮箱渠道", str(settings["mailpoolhub_provider"])
+    settings["mailpoolhub_provider"] = prompt_mail_provider(
+        str(settings["mailpoolhub_provider"])
     )
     settings["proxy_url"] = prompt_text("Resin 代理 URL", str(settings["proxy_url"]))
     settings["mailpoolhub_api_key"] = prompt_text(

@@ -15,6 +15,7 @@ import requests
 
 YYDS_BASE_URL = "https://maliapi.215.im/v1"
 DEFAULT_MAILPOOLHUB_BASE_URL = "http://127.0.0.1:8080/api/v1"
+MAX_EXCLUDED_DOMAIN_ATTEMPTS = 10
 
 
 class MailProviderError(RuntimeError):
@@ -240,6 +241,7 @@ class MailPoolHubProvider:
         provider_name: str = "",
         provider_names: list[str] | None = None,
         provider_start: int = 0,
+        allow_provider_fallback: bool = True,
     ):
         """创建 MailPoolHub 客户端并隔离本机 API 与系统代理。"""
         normalized_url = str(base_url or DEFAULT_MAILPOOLHUB_BASE_URL).strip().rstrip("/")
@@ -264,6 +266,7 @@ class MailPoolHubProvider:
             )
         )
         self.provider_cursor = max(0, int(provider_start))
+        self.allow_provider_fallback = bool(allow_provider_fallback)
         self.available_provider_names: list[str] | None = None
         self.session = requests.Session()
         # 本机 API 不应被 HTTP_PROXY/HTTPS_PROXY 转发到外部代理。
@@ -384,7 +387,9 @@ class MailPoolHubProvider:
                 and str(provider.get("healthStatus") or "").lower() in {"healthy", "ok"}
             ]
             preferred = [name for name in self.provider_names if name in available]
-            self.available_provider_names = preferred or available
+            self.available_provider_names = preferred or (
+                available if self.allow_provider_fallback else []
+            )
         candidates = self.available_provider_names
         if not candidates:
             raise MailProviderError(
@@ -410,42 +415,51 @@ class MailPoolHubProvider:
         }
         if domain:
             base_payload["domain"] = domain
-        # MailPoolHub 当前由服务端调度渠道，没有 excludeDomains 请求字段。
-        _ = exclude_domains
-
-        last_error: MailProviderError | None = None
-        body: dict | None = None
-        for provider_name in self._provider_candidates():
-            payload = dict(base_payload)
-            payload["tags"] = dict(base_payload["tags"])
-            if provider_name:
-                payload["provider"] = provider_name
-            try:
-                body = self._request_json(
-                    "POST",
-                    "/mailboxes",
-                    json_body=payload,
+        excluded = {
+            str(value).strip().casefold()
+            for value in (exclude_domains or [])
+            if str(value).strip()
+        }
+        for _ in range(MAX_EXCLUDED_DOMAIN_ATTEMPTS):
+            last_error: MailProviderError | None = None
+            body: dict | None = None
+            for provider_name in self._provider_candidates():
+                payload = dict(base_payload)
+                payload["tags"] = dict(base_payload["tags"])
+                payload["tags"]["requestId"] = uuid4().hex
+                if provider_name:
+                    payload["provider"] = provider_name
+                try:
+                    body = self._request_json(
+                        "POST",
+                        "/mailboxes",
+                        json_body=payload,
+                    )
+                    break
+                except MailProviderError as error:
+                    last_error = error
+            if body is None:
+                raise last_error or MailProviderError(
+                    "MailPoolHub 创建邮箱失败",
+                    code="CREATE_ACCOUNT_FAILED",
                 )
-                break
-            except MailProviderError as error:
-                last_error = error
-        if body is None:
-            raise last_error or MailProviderError(
-                "MailPoolHub 创建邮箱失败",
-                code="CREATE_ACCOUNT_FAILED",
-            )
-        account = body
-
-        mailbox_id = str(account.get("id") or "").strip()
-        address = str(account.get("address") or "").strip()
-        if not mailbox_id or not address:
-            raise MailProviderError(
-                "MailPoolHub 返回的邮箱缺少 id 或 address",
-                code="INVALID_ACCOUNT",
-            )
-        if not account.get("domain") and "@" in address:
-            account["domain"] = address.rsplit("@", 1)[-1]
-        return account
+            account = body
+            mailbox_id = str(account.get("id") or "").strip()
+            address = str(account.get("address") or "").strip()
+            if not mailbox_id or not address:
+                raise MailProviderError(
+                    "MailPoolHub 返回的邮箱缺少 id 或 address",
+                    code="INVALID_ACCOUNT",
+                )
+            if not account.get("domain") and "@" in address:
+                account["domain"] = address.rsplit("@", 1)[-1]
+            if str(account.get("domain") or "").casefold() not in excluded:
+                return account
+            self.close_account(account)
+        raise MailProviderError(
+            "MailPoolHub 连续返回已排除的邮箱域名",
+            code="EXCLUDED_DOMAINS_EXHAUSTED",
+        )
 
     def wait_for_code(self, account: dict, timeout: int = 90) -> str | None:
         """轮询 MailPoolHub 邮件列表并从详情中提取验证码。"""
