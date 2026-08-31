@@ -1,8 +1,10 @@
 # Local configuration and secrets
 config.yaml
+!/deploy/config.yaml
 .env
 .env.*
 *.env
+!.env.example
 reg/start_reg.settings.json
 
 # Build and test output
@@ -28,3 +30,6 @@ api_keys.txt
 *.exe
 build/
 build.bat
+
+# Local deployment execution evidence
+/work/deploy-us/
