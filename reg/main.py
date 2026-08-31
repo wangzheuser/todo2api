@@ -1011,7 +1011,8 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     else:
         # 多线程
         print(f"  启动 {workers} 个线程...\n")
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
             future_map = {
                 pool.submit(
                     process_one_account,
@@ -1045,6 +1046,13 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                     failed += 1
 
                 print(f"    总进度: {done}/{args.count}  成功: {success}  失败: {failed}")
+        except KeyboardInterrupt:
+            for future in future_map:
+                future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            pool.shutdown(wait=True)
 
     # ── 汇总 ──
     elapsed = time.time() - start_time
@@ -1059,4 +1067,8 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\n收到 Ctrl+C，强制结束。", flush=True)
+        os._exit(130)

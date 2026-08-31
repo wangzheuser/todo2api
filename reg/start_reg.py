@@ -60,6 +60,44 @@ def build_command(settings: dict) -> list[str]:
     ]
 
 
+def terminate_process_tree(process: subprocess.Popen) -> None:
+    """强制终止注册进程及其浏览器子进程。"""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
+def run_registration(command: list[str], environment: dict) -> int:
+    popen_options = {"env": environment, "cwd": SCRIPT_DIR}
+    if os.name == "nt":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_options["start_new_session"] = True
+    process = subprocess.Popen(command, **popen_options)
+    try:
+        while True:
+            try:
+                return process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                continue
+    except KeyboardInterrupt:
+        print("\n收到 Ctrl+C，正在强制结束所有注册和浏览器进程...", flush=True)
+        terminate_process_tree(process)
+        return 130
+
+
 def main() -> int:
     saved = load_settings()
     defaults = {
@@ -114,11 +152,18 @@ def main() -> int:
         f"\n启动注册：总数={settings['count']}，并发={settings['threads']}，"
         f"浏览器并发={settings['turnstile_concurrency']}，渠道={settings['mailpoolhub_provider']}\n"
     )
-    try:
-        return subprocess.run(build_command(settings), env=environment, cwd=SCRIPT_DIR).returncode
-    except KeyboardInterrupt:
-        return 130
+    return run_registration(build_command(settings), environment)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    except KeyboardInterrupt:
+        print("\n收到 Ctrl+C，强制结束。", flush=True)
+        exit_code = 130
+    if "--pause" in sys.argv[1:] and exit_code != 130:
+        try:
+            input("\n按回车关闭窗口...")
+        except EOFError:
+            pass
+    raise SystemExit(exit_code)

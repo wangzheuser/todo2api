@@ -7,9 +7,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python "%~dp0start_reg.py"
-set "exit_code=%errorlevel%"
-echo(
-if not "%exit_code%"=="0" echo Launcher exit code: %exit_code%
-pause
-exit /b %exit_code%
+start "Todofor.ai Registration" python "%~dp0start_reg.py" --pause
+exit /b 0
