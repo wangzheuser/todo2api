@@ -6,7 +6,10 @@
     "request_timeout": 30,
     "poll_interval_seconds": 5,
     "ttl_seconds": 900,
-    "provider": ""
+    "provider": "auto",
+    "providers": [
+      "tempmail_lol"
+    ]
   },
   "yyds": {
     "api_key": "AC-xxx"

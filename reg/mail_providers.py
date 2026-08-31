@@ -238,6 +238,8 @@ class MailPoolHubProvider:
         poll_interval_seconds: int = 5,
         ttl_seconds: int = 900,
         provider_name: str = "",
+        provider_names: list[str] | None = None,
+        provider_start: int = 0,
     ):
         """创建 MailPoolHub 客户端并隔离本机 API 与系统代理。"""
         normalized_url = str(base_url or DEFAULT_MAILPOOLHUB_BASE_URL).strip().rstrip("/")
@@ -254,6 +256,15 @@ class MailPoolHubProvider:
         self.poll_interval_seconds = max(1, int(poll_interval_seconds))
         self.ttl_seconds = max(60, int(ttl_seconds))
         self.provider_name = str(provider_name or "").strip()
+        self.provider_names = list(
+            dict.fromkeys(
+                name.strip()
+                for name in (provider_names or [])
+                if isinstance(name, str) and name.strip()
+            )
+        )
+        self.provider_cursor = max(0, int(provider_start))
+        self.available_provider_names: list[str] | None = None
         self.session = requests.Session()
         # 本机 API 不应被 HTTP_PROXY/HTTPS_PROXY 转发到外部代理。
         self.session.trust_env = False
@@ -353,31 +364,76 @@ class MailPoolHubProvider:
                 )
         return sorted(domains)
 
+    def _provider_candidates(self) -> list[str]:
+        """按运行时健康清单过滤并轮换注册渠道。"""
+        if not self.provider_names:
+            return [self.provider_name] if self.provider_name else [""]
+        if self.available_provider_names is None:
+            body = self._request_json("GET", "/providers")
+            providers = body.get("providers")
+            if not isinstance(providers, list):
+                raise MailProviderError(
+                    "MailPoolHub Provider 列表结构无效",
+                    code="INVALID_PROVIDER_LIST",
+                )
+            available = [
+                str(provider.get("name") or "").strip()
+                for provider in providers
+                if isinstance(provider, dict)
+                and str(provider.get("name") or "").strip()
+                and str(provider.get("healthStatus") or "").lower() in {"healthy", "ok"}
+            ]
+            preferred = [name for name in self.provider_names if name in available]
+            self.available_provider_names = preferred or available
+        candidates = self.available_provider_names
+        if not candidates:
+            raise MailProviderError(
+                "MailPoolHub 没有可用邮箱渠道",
+                code="NO_HEALTHY_PROVIDER",
+            )
+        start = self.provider_cursor % len(candidates)
+        self.provider_cursor += 1
+        return candidates[start:] + candidates[:start]
+
     def create_account(
         self,
         domain: str = "",
         exclude_domains: list[str] | None = None,
     ) -> dict:
         """通过 MailPoolHub 创建临时邮箱并返回邮箱会话。"""
-        payload: dict = {
+        base_payload: dict = {
             "ttlSeconds": self.ttl_seconds,
             "tags": {
                 "scene": "todo2api-reg",
                 "requestId": uuid4().hex,
             },
         }
-        if self.provider_name:
-            payload["provider"] = self.provider_name
         if domain:
-            payload["domain"] = domain
+            base_payload["domain"] = domain
         # MailPoolHub 当前由服务端调度渠道，没有 excludeDomains 请求字段。
         _ = exclude_domains
 
-        body = self._request_json(
-            "POST",
-            "/mailboxes",
-            json_body=payload,
-        )
+        last_error: MailProviderError | None = None
+        body: dict | None = None
+        for provider_name in self._provider_candidates():
+            payload = dict(base_payload)
+            payload["tags"] = dict(base_payload["tags"])
+            if provider_name:
+                payload["provider"] = provider_name
+            try:
+                body = self._request_json(
+                    "POST",
+                    "/mailboxes",
+                    json_body=payload,
+                )
+                break
+            except MailProviderError as error:
+                last_error = error
+        if body is None:
+            raise last_error or MailProviderError(
+                "MailPoolHub 创建邮箱失败",
+                code="CREATE_ACCOUNT_FAILED",
+            )
         account = body
 
         mailbox_id = str(account.get("id") or "").strip()

@@ -213,6 +213,19 @@ class MailPoolHubProviderTest(unittest.TestCase):
         self.assertEqual(404, context.exception.status)
         self.assertEqual("MAILBOX_NOT_FOUND", context.exception.code)
 
+    def test_unavailable_preference_falls_back_to_runtime_provider(self) -> None:
+        """验证已下线的保存渠道会被运行时健康清单替换。"""
+        provider = MailPoolHubProvider(
+            base_url=self.base_url,
+            api_key="local-test-token",
+            provider_name="removed-provider",
+            provider_names=["removed-provider", "fixture"],
+            request_timeout=3,
+        )
+        account = provider.create_account()
+        provider.close_account(account)
+        self.assertEqual("fixture", MailPoolHubContractHandler.last_create_payload["provider"])
+
 
 class VerificationCodeTest(unittest.TestCase):
     """验证码字段与正文兜底提取测试。"""
@@ -281,8 +294,8 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(1, provider.create_count)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
 
-    def test_captcha_error_is_retried_with_browser_token(self) -> None:
-        """验证 CAPTCHA_REQUIRED 会触发求解并携带令牌重发 OTP。"""
+    def test_browser_token_is_ready_before_mailbox_creation(self) -> None:
+        """验证创建邮箱前已通过同一代理取得浏览器令牌。"""
         provider = _FakeMailProvider()
         solver = Mock(return_value="turnstile-token")
 
@@ -296,12 +309,13 @@ class RegistrationFlowTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(result)
+        self.assertEqual(1, solver.call_count)
         proxy_url = solver.call_args.args[0]
         self.assertNotIn("{uuid}", proxy_url)
         self.assertTrue(proxy_url.startswith("http://us."))
 
-    def test_anonymous_session_failure_rotates_proxy_and_retries(self) -> None:
-        """验证代理初始化失败会进入下一次任务尝试。"""
+    def test_anonymous_session_failure_rotates_before_creating_mailbox(self) -> None:
+        """验证坏代理会在创建邮箱前换 UUID。"""
         provider = _FakeMailProvider()
         _InitFailsOnceTodoforAI.instances = 0
 
@@ -314,8 +328,9 @@ class RegistrationFlowTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(result)
-        self.assertEqual(2, provider.create_count)
-        self.assertEqual(2, len(provider.closed_account_ids))
+        self.assertEqual(2, _InitFailsOnceTodoforAI.instances)
+        self.assertEqual(1, provider.create_count)
+        self.assertEqual(1, len(provider.closed_account_ids))
 
     def test_turnstile_failure_rotates_proxy_and_retries(self) -> None:
         """验证浏览器验证失败会换邮箱和代理继续尝试。"""
@@ -459,6 +474,8 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIsNot(first.session, second.session)
         self.assertFalse(first.session.trust_env)
+        self.assertEqual(0, first.provider_cursor)
+        self.assertEqual(0, second.provider_cursor)
 
     def test_factory_accepts_mailpoolhub_provider_override(self) -> None:
         """验证启动器可固定到已经实测成功的下游渠道。"""
@@ -467,7 +484,9 @@ class RegistrationFlowTest(unittest.TestCase):
             {"mailpoolhub": {"api_key": "local-test-token"}},
             mailpoolhub_provider_name="mailgw",
         )
-        self.assertEqual("mailgw", factory().provider_name)
+        provider = factory()
+        self.assertEqual("mailgw", provider.provider_name)
+        self.assertEqual("mailgw", provider.provider_names[0])
 
     def test_factory_rejects_missing_mailpoolhub_api_key(self) -> None:
         """验证缺少 MailPoolHub API Key 时在启动阶段给出配置错误。"""

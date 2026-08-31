@@ -68,7 +68,7 @@ def main() -> int:
         "max_retries": 5,
         "turnstile_concurrency": 2,
         "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
-        "mailpoolhub_provider": "mailgw",
+        "mailpoolhub_provider": "auto",
         "mailpoolhub_api_key": os.environ.get("MAILPOOLHUB_API_KEY", ""),
         "proxy_url": os.environ.get("TODO_PROXY_URL", ""),
     }

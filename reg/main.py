@@ -51,6 +51,9 @@ from mail_providers import (
 TODO_BASE = "https://api.todofor.ai"
 TODO_ORIGIN = "https://todofor.ai"
 TURNSTILE_SITE_KEY = "0x4AAAAAAEP6KBMVDx9FVTzd"
+MAILPOOLHUB_REGISTRATION_PROVIDERS = (
+    "tempmail_lol",
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_FILE = SCRIPT_DIR / "config.json"
@@ -280,6 +283,12 @@ def create_mail_provider_factory(
         poll_interval_seconds = int(mailpoolhub_cfg.get("poll_interval_seconds") or 5)
         ttl_seconds = int(mailpoolhub_cfg.get("ttl_seconds") or 900)
         forced_provider_name = str(mailpoolhub_provider_name or mailpoolhub_cfg.get("provider") or "")
+        configured_provider_names = mailpoolhub_cfg.get("providers")
+        if not isinstance(configured_provider_names, list):
+            configured_provider_names = list(MAILPOOLHUB_REGISTRATION_PROVIDERS)
+        provider_names = list(configured_provider_names)
+        if forced_provider_name and forced_provider_name.lower() != "auto":
+            provider_names.insert(0, forced_provider_name)
 
         def create_mailpoolhub_provider() -> TemporaryMailProvider:
             """为单个注册任务创建独立 MailPoolHub Session。"""
@@ -290,6 +299,7 @@ def create_mail_provider_factory(
                 poll_interval_seconds=poll_interval_seconds,
                 ttl_seconds=ttl_seconds,
                 provider_name=forced_provider_name,
+                provider_names=provider_names,
             )
 
         return create_mailpoolhub_provider, f"MailPoolHub ({str(base_url).rstrip('/')})"
@@ -582,6 +592,7 @@ def process_one_account(
     proxies: dict | None = None,
     turnstile_solver: Callable[[str], str] | None = None,
     max_retries: int = 5,
+    proxy_attempts: int = 5,
     initial_delay: float = 0,
     verbose: bool = False,
 ) -> dict | None:
@@ -602,7 +613,30 @@ def process_one_account(
 
     for attempt in range(1, max_retries + 1):
         account: dict | None = None
+        todo: TodoforAI | None = None
+        captcha_token = ""
         try:
+            last_session_error: Exception | None = None
+            for proxy_attempt in range(1, max(1, proxy_attempts if proxies else 1) + 1):
+                candidate = TodoforAI(proxies=resolve_proxy_templates(proxies))
+                try:
+                    if not candidate.init_anonymous_session():
+                        raise requests.RequestException("匿名会话初始化失败")
+                    if turnstile_solver:
+                        log(thread_id, "🧩 获取浏览器验证令牌...")
+                        captcha_token = turnstile_solver(candidate.proxy_url)
+                    todo = candidate
+                    break
+                except Exception as error:
+                    last_session_error = error
+                    session = getattr(candidate, "session", None)
+                    if session is not None:
+                        session.close()
+                    if proxy_attempt < proxy_attempts:
+                        log(thread_id, f"   当前代理或浏览器不可用，换 UUID... ({proxy_attempt}/{proxy_attempts})")
+            if todo is None:
+                raise last_session_error or requests.RequestException("匿名会话初始化失败")
+
             # ── 1. 创建临时邮箱 ──
             current_exclude = (exclude_domains or []) + failed_domains
             log(thread_id, f"📧 创建临时邮箱... (尝试 {attempt}/{max_retries})")
@@ -613,18 +647,14 @@ def process_one_account(
             email = account["address"]
             used_domain = account.get("domain", email.split("@")[-1])
             log(thread_id, f"   邮箱: {email}")
-            todo = TodoforAI(proxies=resolve_proxy_templates(proxies))
+            if account.get("provider"):
+                log(thread_id, f"   渠道: {account['provider']}")
 
-            # ── 2. 初始化匿名会话 ──
-            log(thread_id, "🔗 初始化 todofor.ai 匿名会话...")
-            if not todo.init_anonymous_session():
-                raise requests.RequestException("匿名会话初始化失败")
-
-            # ── 3. 发送验证码 ──
+            # ── 2. 发送验证码 ──
             log(thread_id, "📤 发送 OTP...")
-            otp_sent = todo.send_otp(email)
+            otp_sent = todo.send_otp(email, captcha_token)
             if not otp_sent and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED" and turnstile_solver:
-                log(thread_id, "🧩 获取浏览器验证令牌...")
+                log(thread_id, "🧩 浏览器令牌已过期，重新获取...")
                 captcha_token = turnstile_solver(todo.proxy_url)
                 otp_sent = todo.send_otp(email, captcha_token)
 
@@ -750,6 +780,10 @@ def process_one_account(
                 continue
             return None
         finally:
+            if todo is not None:
+                session = getattr(todo, "session", None)
+                if session is not None:
+                    session.close()
             if account:
                 try:
                     mail_provider.close_account(account)
