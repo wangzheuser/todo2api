@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import main
+import start_reg
 from mail_providers import MailPoolHubProvider, MailProviderError, extract_verification_code
 
 
@@ -61,7 +64,7 @@ class MailPoolHubContractHandler(BaseHTTPRequestHandler):
         if self.path == "/api/v1/mailboxes/mailbox-1/messages?refresh=true":
             type(self).message_requests += 1
             if type(self).message_requests == 1:
-                self._write_json(200, {"mailboxId": "mailbox-1", "messages": []})
+                self._write_json(502, {"error": {"code": "UPSTREAM_EOF", "message": "upstream EOF"}})
                 return
             self._write_json(
                 200,
@@ -278,6 +281,71 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(1, provider.create_count)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
 
+    def test_captcha_error_is_retried_with_browser_token(self) -> None:
+        """验证 CAPTCHA_REQUIRED 会触发求解并携带令牌重发 OTP。"""
+        provider = _FakeMailProvider()
+        solver = Mock(return_value="turnstile-token")
+
+        with patch.object(main, "TodoforAI", _CaptchaThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://us.{uuid}:token@127.0.0.1:9200"},
+                turnstile_solver=solver,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        proxy_url = solver.call_args.args[0]
+        self.assertNotIn("{uuid}", proxy_url)
+        self.assertTrue(proxy_url.startswith("http://us."))
+
+    def test_anonymous_session_failure_rotates_proxy_and_retries(self) -> None:
+        """验证代理初始化失败会进入下一次任务尝试。"""
+        provider = _FakeMailProvider()
+        _InitFailsOnceTodoforAI.instances = 0
+
+        with patch.object(main, "TodoforAI", _InitFailsOnceTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
+                max_retries=2,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, provider.create_count)
+        self.assertEqual(2, len(provider.closed_account_ids))
+
+    def test_turnstile_failure_rotates_proxy_and_retries(self) -> None:
+        """验证浏览器验证失败会换邮箱和代理继续尝试。"""
+        provider = _FakeMailProvider()
+        solver = Mock(side_effect=[TimeoutError("probe timeout"), "turnstile-token"])
+
+        with patch.object(main, "TodoforAI", _CaptchaThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
+                turnstile_solver=solver,
+                max_retries=2,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, solver.call_count)
+        self.assertNotEqual(solver.call_args_list[0].args[0], solver.call_args_list[1].args[0])
+
+    def test_missing_api_key_is_not_counted_as_success(self) -> None:
+        """验证登录成功但无 Key 时会重试而不是返回伪成功。"""
+        provider = _FakeMailProvider()
+        _NoKeysThenSuccessTodoforAI.instances = 0
+
+        with patch.object(main, "TodoforAI", _NoKeysThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, lambda: provider, max_retries=2)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, provider.create_count)
+
     def test_send_otp_preserves_business_error(self) -> None:
         """验证 OTP 接口错误码和错误消息会传递给注册流程。"""
         todo = main.TodoforAI()
@@ -292,6 +360,54 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual("CAPTCHA_REQUIRED", todo.last_otp_error_code)
         self.assertEqual("Browser verification failed.", todo.last_otp_error_message)
         self.assertEqual(400, todo.last_otp_status)
+
+    def test_send_otp_adds_captcha_header(self) -> None:
+        """验证浏览器令牌通过目标网页使用的请求头提交。"""
+        todo = main.TodoforAI()
+        response = Mock(status_code=200)
+        response.json.return_value = {"success": True}
+        todo.session.post = Mock(return_value=response)
+
+        self.assertTrue(todo.send_otp("fixture@mail.test", "turnstile-token"))
+        headers = todo.session.post.call_args.kwargs["headers"]
+        self.assertEqual("turnstile-token", headers["x-captcha-response"])
+
+    def test_proxy_template_uses_one_uuid_per_session(self) -> None:
+        """验证 HTTP 和 HTTPS 代理共享同一个 Resin 粘性身份。"""
+        proxies = main.resolve_proxy_templates(
+            {
+                "http": "http://us.{uuid}:token@127.0.0.1:9200",
+                "https": "http://us.{uuid}:token@127.0.0.1:9200",
+            }
+        )
+        self.assertEqual(proxies["http"], proxies["https"])
+        self.assertNotIn("{uuid}", proxies["http"])
+
+    def test_interactive_launcher_builds_expected_command(self) -> None:
+        """验证交互启动器完整传递批量注册关键参数。"""
+        command = start_reg.build_command(
+            {
+                "count": 10,
+                "threads": 3,
+                "max_retries": 6,
+                "turnstile_concurrency": 2,
+                "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
+                "mailpoolhub_provider": "mailgw",
+                "proxy_url": "http://jp.{uuid}:token@127.0.0.1:9200",
+            }
+        )
+        self.assertIn("--count", command)
+        self.assertEqual("10", command[command.index("--count") + 1])
+        self.assertEqual("3", command[command.index("--threads") + 1])
+        self.assertEqual("mailgw", command[command.index("--mailpoolhub-provider") + 1])
+
+    def test_interactive_launcher_remembers_settings(self) -> None:
+        """验证启动器配置可原子保存并在下次启动复用。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            settings = {"count": 10, "threads": 3, "mailpoolhub_api_key": "fixture-key"}
+            start_reg.save_settings(settings, path)
+            self.assertEqual(settings, start_reg.load_settings(path))
 
     def test_factory_returns_independent_mailpoolhub_sessions(self) -> None:
         """验证并发任务不会共享 requests.Session。"""
@@ -311,6 +427,15 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIsNot(first.session, second.session)
         self.assertFalse(first.session.trust_env)
+
+    def test_factory_accepts_mailpoolhub_provider_override(self) -> None:
+        """验证启动器可固定到已经实测成功的下游渠道。"""
+        factory, _ = main.create_mail_provider_factory(
+            "mailpoolhub",
+            {"mailpoolhub": {"api_key": "local-test-token"}},
+            mailpoolhub_provider_name="mailgw",
+        )
+        self.assertEqual("mailgw", factory().provider_name)
 
     def test_factory_rejects_missing_mailpoolhub_api_key(self) -> None:
         """验证缺少 MailPoolHub API Key 时在启动阶段给出配置错误。"""
@@ -359,12 +484,13 @@ class _FakeTodoforAI:
     def __init__(self, proxies: dict | None = None):
         """保存代理参数用于接口兼容。"""
         self.proxies = proxies
+        self.proxy_url = str((proxies or {}).get("https") or (proxies or {}).get("http") or "")
 
     def init_anonymous_session(self) -> bool:
         """模拟匿名会话创建成功。"""
         return True
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟向测试邮箱发送 OTP。"""
         return email == "fixture@mail.test"
 
@@ -396,7 +522,7 @@ class _FakeTodoforAI:
 class _RejectingTodoforAI(_FakeTodoforAI):
     """模拟目标站拒绝发送 OTP 的客户端。"""
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟 OTP 发送失败。"""
         return False
 
@@ -408,9 +534,57 @@ class _CaptchaRequiredTodoforAI(_FakeTodoforAI):
     last_otp_error_message = "Browser verification failed."
     last_otp_status = 400
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟纯 HTTP 会话缺少浏览器验证令牌。"""
         return False
+
+
+class _CaptchaThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟浏览器令牌到达后允许发送 OTP。"""
+
+    last_otp_error_code = ""
+    last_otp_error_message = ""
+    last_otp_status = 0
+
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
+        if captcha_token == "turnstile-token":
+            self.last_otp_error_code = ""
+            self.last_otp_error_message = ""
+            self.last_otp_status = 200
+            return True
+        self.last_otp_error_code = "CAPTCHA_REQUIRED"
+        self.last_otp_error_message = "Browser verification failed."
+        self.last_otp_status = 400
+        return False
+
+
+class _InitFailsOnceTodoforAI(_FakeTodoforAI):
+    """模拟首个代理出口初始化失败。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def init_anonymous_session(self) -> bool:
+        return type(self).instances > 1
+
+
+class _NoKeysThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟首次登录后 API Key 尚未创建。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def get_api_keys(self) -> list[dict]:
+        return [] if type(self).instances == 1 else super().get_api_keys()
+
+    def get_default_api_key(self) -> dict | None:
+        return None if type(self).instances == 1 else super().get_default_api_key()
 
 
 if __name__ == "__main__":

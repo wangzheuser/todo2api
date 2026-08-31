@@ -401,11 +401,19 @@ class MailPoolHubProvider:
         encoded_id = quote(mailbox_id, safe="")
         inspected_message_ids: set[str] = set()
         while time.monotonic() < deadline:
-            body = self._request_json(
-                "GET",
-                f"/mailboxes/{encoded_id}/messages",
-                params={"refresh": "true"},
-            )
+            try:
+                body = self._request_json(
+                    "GET",
+                    f"/mailboxes/{encoded_id}/messages",
+                    params={"refresh": "true"},
+                )
+            except MailProviderError as error:
+                if error.status and error.status < 500:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(self.poll_interval_seconds, remaining))
+                continue
             messages = body.get("messages")
             if not isinstance(messages, list):
                 raise MailProviderError(
@@ -426,10 +434,15 @@ class MailPoolHubProvider:
                 message_id = str(summary.get("id") or "").strip()
                 if not message_id:
                     continue
-                detail = self._request_json(
-                    "GET",
-                    f"/mailboxes/{encoded_id}/messages/{quote(message_id, safe='')}",
-                )
+                try:
+                    detail = self._request_json(
+                        "GET",
+                        f"/mailboxes/{encoded_id}/messages/{quote(message_id, safe='')}",
+                    )
+                except MailProviderError as error:
+                    if error.status and error.status < 500:
+                        raise
+                    continue
                 inspected_message_ids.add(message_id)
                 code = extract_verification_code(detail)
                 if code:

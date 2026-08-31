@@ -14,7 +14,15 @@
   "domain": "",
   "exclude_domains": [],
   "proxy": {
-    "http": "",
-    "https": ""
+    "http": "http://us.{uuid}:proxy_token@127.0.0.1:9200",
+    "https": "http://us.{uuid}:proxy_token@127.0.0.1:9200"
+  },
+  "turnstile": {
+    "enabled": true,
+    "site_key": "0x4AAAAAAEP6KBMVDx9FVTzd",
+    "browser_channel": "chrome",
+    "headless": false,
+    "timeout": 45,
+    "max_concurrency": 2
   }
 }

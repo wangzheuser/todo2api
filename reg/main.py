@@ -18,7 +18,7 @@ Todofor.ai 批量注册机
   # 命令行覆盖 config 中的 Key
   python main.py -k AC-xxx -n 50 -t 10
 
-依赖: pip install requests
+依赖: pip install -r requirements.txt
 """
 
 import os
@@ -33,6 +33,8 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Callable
+from urllib.parse import unquote, urlparse
+from uuid import uuid4
 
 from mail_providers import (
     DEFAULT_MAILPOOLHUB_BASE_URL,
@@ -47,6 +49,7 @@ from mail_providers import (
 
 TODO_BASE = "https://api.todofor.ai"
 TODO_ORIGIN = "https://todofor.ai"
+TURNSTILE_SITE_KEY = "0x4AAAAAAEP6KBMVDx9FVTzd"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_FILE = SCRIPT_DIR / "config.json"
@@ -55,6 +58,106 @@ OUTPUT_FILE = SCRIPT_DIR / "get_apikey.txt"
 # 线程安全锁
 FILE_LOCK = threading.Lock()
 PRINT_LOCK = threading.Lock()
+
+
+def resolve_proxy_templates(proxies: dict | None) -> dict | None:
+    """为单次注册解析共享的 Resin 粘性会话 UUID。"""
+    if not proxies:
+        return None
+    session_id = uuid4().hex
+    return {
+        key: value.replace("{uuid}", session_id)
+        for key, value in proxies.items()
+    }
+
+
+def solve_turnstile(
+    proxy_url: str = "",
+    *,
+    site_key: str = TURNSTILE_SITE_KEY,
+    browser_channel: str = "chrome",
+    headless: bool = False,
+    timeout: int = 45,
+) -> str:
+    """在目标页面生成 Turnstile token，并保持与业务请求相同的代理出口。"""
+    try:
+        from patchright.sync_api import sync_playwright
+    except ImportError as error:
+        raise RuntimeError("缺少 patchright，请执行 pip install -r requirements.txt") from error
+
+    proxy_options = None
+    if proxy_url:
+        parsed = urlparse(proxy_url)
+        if parsed.scheme not in {"http", "https", "socks5"} or not parsed.hostname or not parsed.port:
+            raise ValueError("Turnstile 代理必须是完整 URL")
+        proxy_options = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+        if parsed.username:
+            proxy_options["username"] = unquote(parsed.username)
+            proxy_options["password"] = unquote(parsed.password or "")
+
+    script = f"""
+    (() => {{
+      const container = document.createElement('div');
+      container.id = 'todo2api-turnstile';
+      document.body.appendChild(container);
+      const load = attempt => {{
+        const script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&retry=' + attempt;
+        script.onload = () => {{
+          try {{
+            window.turnstile.render('#todo2api-turnstile', {{
+              sitekey: {json.dumps(site_key)},
+              callback: token => document.body.dataset.turnstileToken = token,
+              'error-callback': code => document.body.dataset.turnstileError = 'error:' + code,
+              'timeout-callback': () => document.body.dataset.turnstileError = 'timeout'
+            }});
+          }} catch (error) {{
+            document.body.dataset.turnstileError = 'render:' + error;
+          }}
+        }};
+        script.onerror = () => attempt < 5
+          ? setTimeout(() => load(attempt + 1), 500)
+          : document.body.dataset.turnstileError = 'load';
+        document.head.appendChild(script);
+      }};
+      load(0);
+    }})();
+    """
+
+    with sync_playwright() as playwright:
+        launch_options = {"headless": headless}
+        if browser_channel:
+            launch_options["channel"] = browser_channel
+        browser = playwright.chromium.launch(**launch_options)
+        context_options = {"viewport": {"width": 1000, "height": 700}}
+        if proxy_options:
+            context_options["proxy"] = proxy_options
+        context = browser.new_context(**context_options)
+        page = context.new_page()
+        try:
+            response = page.goto(TODO_ORIGIN, wait_until="domcontentloaded", timeout=30_000)
+            if not response or response.status != 200:
+                raise RuntimeError(f"Turnstile 页面加载失败：HTTP {response.status if response else 0}")
+            page.add_script_tag(content=script)
+            deadline = time.monotonic() + max(10, timeout)
+            while time.monotonic() < deadline:
+                page.wait_for_timeout(1000)
+                token = page.locator("body").get_attribute("data-turnstile-token")
+                if token:
+                    return token
+                error = page.locator("body").get_attribute("data-turnstile-error")
+                if error and error != "timeout":
+                    raise RuntimeError(f"Turnstile 求解失败：{error}")
+                for frame in page.frames:
+                    if "challenges.cloudflare.com" not in frame.url:
+                        continue
+                    try:
+                        frame.locator("input[type=checkbox]").first.click(timeout=500, force=True)
+                    except Exception:
+                        pass
+            raise TimeoutError("Turnstile 求解超时")
+        finally:
+            browser.close()
 
 
 # ============================================================
@@ -119,6 +222,7 @@ def create_mail_provider_factory(
     yyds_api_key: str = "",
     mailpoolhub_base_url: str = "",
     mailpoolhub_api_key: str = "",
+    mailpoolhub_provider_name: str = "",
     proxies: dict | None = None,
 ) -> tuple[Callable[[], TemporaryMailProvider], str]:
     """根据配置创建线程隔离的临时邮箱 Provider 工厂。"""
@@ -146,7 +250,7 @@ def create_mail_provider_factory(
         request_timeout = int(mailpoolhub_cfg.get("request_timeout") or 30)
         poll_interval_seconds = int(mailpoolhub_cfg.get("poll_interval_seconds") or 5)
         ttl_seconds = int(mailpoolhub_cfg.get("ttl_seconds") or 900)
-        forced_provider_name = str(mailpoolhub_cfg.get("provider") or "")
+        forced_provider_name = str(mailpoolhub_provider_name or mailpoolhub_cfg.get("provider") or "")
 
         def create_mailpoolhub_provider() -> TemporaryMailProvider:
             """为单个注册任务创建独立 MailPoolHub Session。"""
@@ -209,6 +313,7 @@ class TodoforAI:
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
+        self.proxy_url = str((proxies or {}).get("https") or (proxies or {}).get("http") or "")
         if proxies:
             self.session.proxies.update(proxies)
 
@@ -247,15 +352,18 @@ class TodoforAI:
 
     # ---- 认证 ----
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """发送邮箱登录验证码并保留服务端业务错误。"""
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
+        headers = {**self._api_headers(), "Content-Type": "application/json"}
+        if captcha_token:
+            headers["x-captcha-response"] = captcha_token
         resp = self.session.post(
             f"{TODO_BASE}/api/auth/email-otp/send-verification-otp",
             json={"email": email, "type": "sign-in"},
-            headers={**self._api_headers(), "Content-Type": "application/json"},
+            headers=headers,
             timeout=30,
         )
         self.last_otp_status = resp.status_code
@@ -443,7 +551,9 @@ def process_one_account(
     domain: str = "",
     exclude_domains: list[str] | None = None,
     proxies: dict | None = None,
-    max_retries: int = 3,
+    turnstile_solver: Callable[[str], str] | None = None,
+    max_retries: int = 5,
+    initial_delay: float = 0,
     verbose: bool = False,
 ) -> dict | None:
     """
@@ -457,8 +567,8 @@ def process_one_account(
     except Exception as error:
         log(thread_id, f"❌ 临时邮箱渠道初始化失败: {error}")
         return None
-    todo = TodoforAI(proxies=proxies)
-
+    if initial_delay > 0:
+        time.sleep(initial_delay)
     failed_domains: list[str] = []
 
     for attempt in range(1, max_retries + 1):
@@ -474,16 +584,22 @@ def process_one_account(
             email = account["address"]
             used_domain = account.get("domain", email.split("@")[-1])
             log(thread_id, f"   邮箱: {email}")
+            todo = TodoforAI(proxies=resolve_proxy_templates(proxies))
 
             # ── 2. 初始化匿名会话 ──
             log(thread_id, "🔗 初始化 todofor.ai 匿名会话...")
             if not todo.init_anonymous_session():
-                log(thread_id, "❌ 匿名会话初始化失败")
-                return None
+                raise requests.RequestException("匿名会话初始化失败")
 
             # ── 3. 发送验证码 ──
             log(thread_id, "📤 发送 OTP...")
-            if not todo.send_otp(email):
+            otp_sent = todo.send_otp(email)
+            if not otp_sent and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED" and turnstile_solver:
+                log(thread_id, "🧩 获取浏览器验证令牌...")
+                captcha_token = turnstile_solver(todo.proxy_url)
+                otp_sent = todo.send_otp(email, captcha_token)
+
+            if not otp_sent:
                 error_code = str(getattr(todo, "last_otp_error_code", "") or "UNKNOWN")
                 error_message = str(getattr(todo, "last_otp_error_message", "") or "OTP 发送失败")
                 log(
@@ -499,6 +615,10 @@ def process_one_account(
                     for text in ("temporary email", "browser verification", "captcha")
                 )
                 if non_retryable:
+                    if error_code == "CAPTCHA_REQUIRED" and turnstile_solver and attempt < max_retries:
+                        log(thread_id, "   浏览器令牌未通过，换代理重试...")
+                        time.sleep(min(2 ** (attempt - 1), 10))
+                        continue
                     log(thread_id, "   目标业务要求浏览器验证或永久邮箱，本轮停止域名重试")
                     return None
 
@@ -506,8 +626,7 @@ def process_one_account(
                 failed_domains.append(used_domain)
                 if attempt < max_retries:
                     log(thread_id, f"   换域名重试...")
-                    # 换个新 session，避免被风控
-                    todo = TodoforAI(proxies=proxies)
+                    time.sleep(min(2 ** (attempt - 1), 10))
                     continue
                 return None
 
@@ -516,6 +635,9 @@ def process_one_account(
             otp = mail_provider.wait_for_code(account, timeout=120)
             if not otp:
                 log(thread_id, "❌ 超时未收到验证码")
+                if attempt < max_retries:
+                    time.sleep(min(2 ** (attempt - 1), 10))
+                    continue
                 return None
             log(thread_id, "   已收到验证码")
 
@@ -524,6 +646,9 @@ def process_one_account(
             login_result = todo.verify_otp(email, otp)
             if not login_result:
                 log(thread_id, "❌ 登录失败（OTP 错误或已过期）")
+                if attempt < max_retries:
+                    time.sleep(min(2 ** (attempt - 1), 10))
+                    continue
                 return None
 
             user = login_result["user"]
@@ -554,6 +679,13 @@ def process_one_account(
                 api_keys = []
                 default_key = None
 
+            if not api_keys:
+                log(thread_id, "❌ 登录成功但未取得 API Key")
+                if attempt < max_retries:
+                    time.sleep(min(2 ** (attempt - 1), 10))
+                    continue
+                return None
+
             # ── 7. 组装结果 ──
             result = {
                 "thread_id": thread_id,
@@ -577,6 +709,7 @@ def process_one_account(
         except requests.RequestException as e:
             log(thread_id, f"❌ 网络异常 (尝试 {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
+                time.sleep(min(2 ** (attempt - 1), 10))
                 continue
             return None
         except Exception as e:
@@ -584,6 +717,7 @@ def process_one_account(
             if verbose:
                 traceback.print_exc()
             if attempt < max_retries:
+                time.sleep(min(2 ** (attempt - 1), 10))
                 continue
             return None
         finally:
@@ -652,6 +786,14 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                         help="MailPoolHub 客户端 API 地址（默认: http://127.0.0.1:8080/api/v1）")
     parser.add_argument("--mailpoolhub-api-key", type=str, default="",
                         help="MailPoolHub API Key（优先推荐使用环境变量）")
+    parser.add_argument("--mailpoolhub-provider", type=str, default="",
+                        help="固定 MailPoolHub 下游渠道（推荐: mailgw）")
+    parser.add_argument("--proxy-url", type=str, default="",
+                        help="目标业务代理 URL，支持 {uuid} Resin 粘性会话模板")
+    parser.add_argument("--max-retries", type=int, default=5,
+                        help="每个账号最大尝试次数（默认: 5）")
+    parser.add_argument("--turnstile-concurrency", type=int, default=0,
+                        help="浏览器验证并发数（默认: min(线程数, 2)）")
     parser.add_argument("--check-mail-provider", action="store_true",
                         help="检查当前临时邮箱渠道并退出")
     parser.add_argument("--list-domains", action="store_true",
@@ -673,9 +815,29 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     # ── 解析代理配置 ──
     proxy_cfg = cfg.get("proxy", {})
     proxies: dict | None = None
-    if isinstance(proxy_cfg, dict) and proxy_cfg:
+    if args.proxy_url:
+        proxies = {"http": args.proxy_url, "https": args.proxy_url}
+    elif isinstance(proxy_cfg, dict) and proxy_cfg:
         # 支持 "http": "http://host:port" 格式
         proxies = {k: v for k, v in proxy_cfg.items() if v and isinstance(v, str)} or None
+
+    turnstile_cfg = cfg.get("turnstile") if isinstance(cfg.get("turnstile"), dict) else {}
+    turnstile_solver = None
+    if turnstile_cfg.get("enabled", True):
+        turnstile_concurrency = args.turnstile_concurrency or int(
+            turnstile_cfg.get("max_concurrency") or min(args.threads, 2)
+        )
+        turnstile_gate = threading.BoundedSemaphore(max(1, turnstile_concurrency))
+
+        def turnstile_solver(proxy_url: str) -> str:
+            with turnstile_gate:
+                return solve_turnstile(
+                    proxy_url,
+                    site_key=str(turnstile_cfg.get("site_key") or TURNSTILE_SITE_KEY),
+                    browser_channel=str(turnstile_cfg.get("browser_channel") or "chrome"),
+                    headless=bool(turnstile_cfg.get("headless", False)),
+                    timeout=int(turnstile_cfg.get("timeout") or 45),
+                )
 
     # ── 解析邮箱渠道 ──
     provider_name = (
@@ -692,6 +854,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             yyds_api_key=yyds_api_key,
             mailpoolhub_base_url=args.mailpoolhub_base_url,
             mailpoolhub_api_key=args.mailpoolhub_api_key,
+            mailpoolhub_provider_name=args.mailpoolhub_provider,
             proxies=proxies,
         )
     except (TypeError, ValueError) as error:
@@ -729,8 +892,8 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             sys.exit(1)
         sys.exit(0)
 
-    if args.count <= 0 or args.threads <= 0:
-        print("错误: -n 和 -t 必须 > 0")
+    if args.count <= 0 or args.threads <= 0 or args.max_retries <= 0 or args.turnstile_concurrency < 0:
+        print("错误: 数量、线程数、重试数必须 > 0，浏览器并发数不能小于 0")
         sys.exit(1)
 
     # ── 准备 ──
@@ -741,9 +904,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"  Todofor.ai 批量注册机")
     print(f"{'=' * 55}")
     print(f"  邮箱渠道 : {provider_label}")
-    print(f"  代理     : {proxies if proxies else '无（直连）'}")
+    print(f"  代理     : {'已配置' if proxies else '无（直连）'}")
     print(f"  注册数量 : {args.count}")
     print(f"  线程数   : {args.threads}")
+    print(f"  重试次数 : {args.max_retries}")
     print(f"  输出文件 : {OUTPUT_FILE}")
     print(f"{'=' * 55}\n")
 
@@ -765,6 +929,8 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                 domain=domain,
                 exclude_domains=exclude_domains,
                 proxies=proxies,
+                turnstile_solver=turnstile_solver,
+                max_retries=args.max_retries,
                 verbose=args.verbose,
             )
             if result:
@@ -786,6 +952,9 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                     domain=domain,
                     exclude_domains=exclude_domains,
                     proxies=proxies,
+                    turnstile_solver=turnstile_solver,
+                    max_retries=args.max_retries,
+                    initial_delay=((i - 1) % workers) * 1.5,
                     verbose=args.verbose,
                 ): i
                 for i in range(1, args.count + 1)
