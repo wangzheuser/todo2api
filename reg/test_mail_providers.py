@@ -324,10 +324,14 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(1, provider.create_count)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
 
-    def test_browser_token_is_ready_before_mailbox_creation(self) -> None:
-        """验证创建邮箱前已通过同一代理取得浏览器令牌。"""
+    def test_browser_token_is_requested_after_protocol_challenge(self) -> None:
+        """验证纯协议失败后才通过同一代理取得浏览器令牌。"""
         provider = _FakeMailProvider()
-        solver = Mock(return_value="turnstile-token")
+        solver = Mock(
+            side_effect=lambda _proxy_url: (
+                self.assertEqual(1, provider.create_count) or "turnstile-token"
+            )
+        )
 
         with patch.object(main, "TodoforAI", _CaptchaThenSuccessTodoforAI), patch.object(main.time, "sleep"):
             result = main.process_one_account(
@@ -343,6 +347,21 @@ class RegistrationFlowTest(unittest.TestCase):
         proxy_url = solver.call_args.args[0]
         self.assertNotIn("{uuid}", proxy_url)
         self.assertTrue(proxy_url.startswith("http://us."))
+
+    def test_browser_is_skipped_when_protocol_otp_succeeds(self) -> None:
+        """验证目标接受纯协议请求时不会启动浏览器。"""
+        solver = Mock(return_value="unused-token")
+
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=solver,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        solver.assert_not_called()
 
     def test_anonymous_session_failure_rotates_before_creating_mailbox(self) -> None:
         """验证坏代理会在创建邮箱前换 UUID。"""
@@ -363,7 +382,7 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(1, len(provider.closed_account_ids))
 
     def test_turnstile_failure_rotates_proxy_and_retries(self) -> None:
-        """验证浏览器验证失败会换邮箱和代理继续尝试。"""
+        """验证浏览器失败时同一邮箱换代理继续尝试。"""
         provider = _FakeMailProvider()
         solver = Mock(side_effect=[TimeoutError("probe timeout"), "turnstile-token"])
 
@@ -373,11 +392,12 @@ class RegistrationFlowTest(unittest.TestCase):
                 lambda: provider,
                 proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
                 turnstile_solver=solver,
-                max_retries=2,
+                max_retries=1,
             )
 
         self.assertIsNotNone(result)
         self.assertEqual(2, solver.call_count)
+        self.assertEqual(1, provider.create_count)
         self.assertNotEqual(solver.call_args_list[0].args[0], solver.call_args_list[1].args[0])
 
     def test_missing_api_key_is_not_counted_as_success(self) -> None:
