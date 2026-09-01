@@ -4,15 +4,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
+import threading
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = SCRIPT_DIR / "start_reg.settings.json"
 WORKING_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
+LOG_FILE = SCRIPT_DIR / "start_reg.log"
+MAX_LOG_BYTES = 16 * 1024 * 1024
 
 
 def load_settings(path: Path = SETTINGS_FILE) -> dict:
@@ -95,11 +101,40 @@ def build_command(settings: dict) -> list[str]:
         "--mailpoolhub-base-url", settings["mailpoolhub_base_url"],
         "--mailpoolhub-provider", settings["mailpoolhub_provider"],
         "--proxy-url", settings["proxy_url"],
+        "--proxy-platforms", settings["proxy_platforms"],
         "--max-retries", str(settings["max_retries"]),
         "--turnstile-concurrency", str(settings["turnstile_concurrency"]),
+        "--turnstile-mode", settings["turnstile_mode"],
+        "--otp-interval", str(settings["otp_interval_seconds"]),
+        "--otp-cooldown", str(settings["otp_cooldown_seconds"]),
+        "--network-cooldown", str(settings["network_cooldown_seconds"]),
         "--count", str(settings["count"]),
         "--threads", str(settings["threads"]),
     ]
+
+
+def relay_output(stream, path: Path = LOG_FILE, max_bytes: int = MAX_LOG_BYTES) -> None:
+    """将注册输出同步到控制台和定长轮转日志。"""
+    logger = logging.getLogger(f"todo2api.reg.{id(stream)}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = RotatingFileHandler(
+        path,
+        maxBytes=max_bytes,
+        backupCount=1,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger.addHandler(handler)
+    try:
+        logger.info("===== registration started %s =====", datetime.now().isoformat(timespec="seconds"))
+        for line in stream:
+            print(line, end="", flush=True)
+            logger.info(line.rstrip("\r\n"))
+    finally:
+        logger.info("===== registration output closed =====")
+        logger.removeHandler(handler)
+        handler.close()
 
 
 def terminate_process_tree(process: subprocess.Popen) -> None:
@@ -122,12 +157,26 @@ def terminate_process_tree(process: subprocess.Popen) -> None:
 
 
 def run_registration(command: list[str], environment: dict) -> int:
-    popen_options = {"env": environment, "cwd": SCRIPT_DIR}
+    environment = dict(environment)
+    environment["PYTHONUNBUFFERED"] = "1"
+    environment["PYTHONIOENCODING"] = "utf-8"
+    popen_options = {
+        "env": environment,
+        "cwd": SCRIPT_DIR,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "bufsize": 1,
+    }
     if os.name == "nt":
         popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         popen_options["start_new_session"] = True
     process = subprocess.Popen(command, **popen_options)
+    relay = threading.Thread(target=relay_output, args=(process.stdout,), daemon=True)
+    relay.start()
     try:
         while True:
             try:
@@ -138,6 +187,8 @@ def run_registration(command: list[str], environment: dict) -> int:
         print("\n收到 Ctrl+C，正在强制结束所有注册和浏览器进程...", flush=True)
         terminate_process_tree(process)
         return 130
+    finally:
+        relay.join(timeout=3)
 
 
 def main() -> int:
@@ -147,10 +198,15 @@ def main() -> int:
         "threads": 2,
         "max_retries": 5,
         "turnstile_concurrency": 2,
+        "turnstile_mode": "always",
+        "otp_interval_seconds": 40,
+        "otp_cooldown_seconds": 3600,
+        "network_cooldown_seconds": 60,
         "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
         "mailpoolhub_provider": "auto",
         "mailpoolhub_api_key": os.environ.get("MAILPOOLHUB_API_KEY", ""),
         "proxy_url": os.environ.get("TODO_PROXY_URL", ""),
+        "proxy_platforms": "node,jp,us,de,github,baokemeng",
     }
     settings = {**defaults, **saved}
 
@@ -165,6 +221,29 @@ def main() -> int:
         "浏览器验证并发数",
         min(int(settings["turnstile_concurrency"]), int(settings["threads"])),
     )
+    while True:
+        settings["turnstile_mode"] = prompt_text(
+            "浏览器验证模式（always/auto/off）",
+            str(settings["turnstile_mode"]),
+        ).lower()
+        if settings["turnstile_mode"] in {"always", "auto", "off"}:
+            break
+        print("请输入 always、auto 或 off")
+    settings["otp_interval_seconds"] = prompt_int(
+        "OTP 提交最小间隔秒数",
+        int(settings["otp_interval_seconds"]),
+        minimum=0,
+    )
+    settings["otp_cooldown_seconds"] = prompt_int(
+        "HTTP 429 全局冷却秒数",
+        int(settings["otp_cooldown_seconds"]),
+        minimum=0,
+    )
+    settings["network_cooldown_seconds"] = prompt_int(
+        "全部代理不可用时冷却秒数",
+        int(settings["network_cooldown_seconds"]),
+        minimum=0,
+    )
     settings["mailpoolhub_base_url"] = prompt_text(
         "MailPoolHub API 地址", str(settings["mailpoolhub_base_url"])
     )
@@ -172,6 +251,9 @@ def main() -> int:
         str(settings["mailpoolhub_provider"])
     )
     settings["proxy_url"] = prompt_text("Resin 代理 URL", str(settings["proxy_url"]))
+    settings["proxy_platforms"] = prompt_text(
+        "Resin 平台轮换列表", str(settings["proxy_platforms"])
+    )
     settings["mailpoolhub_api_key"] = prompt_text(
         "MailPoolHub API Key", str(settings["mailpoolhub_api_key"])
     )
@@ -193,6 +275,7 @@ def main() -> int:
     print(
         f"\n启动注册：总数={settings['count']}，并发={settings['threads']}，"
         f"浏览器并发={settings['turnstile_concurrency']}，渠道={settings['mailpoolhub_provider']}\n"
+        f"日志文件：{LOG_FILE}（单文件最大 16 MiB）\n"
     )
     return run_registration(build_command(settings), environment)
 

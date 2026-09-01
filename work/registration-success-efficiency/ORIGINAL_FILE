@@ -32,7 +32,7 @@ import secrets
 import traceback
 import requests
 from pathlib import Path
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Callable
 from urllib.parse import unquote, urlparse
@@ -66,43 +66,6 @@ WORKING_MAIL_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
 FILE_LOCK = threading.Lock()
 PRINT_LOCK = threading.Lock()
 REJECTED_DOMAIN_LOCK = threading.Lock()
-
-
-class RequestIntervalGate:
-    """在线程间将目标请求按固定最小间隔排队。"""
-
-    def __init__(self, interval_seconds: float):
-        self.interval_seconds = max(0.0, float(interval_seconds))
-        self.next_allowed = 0.0
-        self.cooldown_until = 0.0
-        self.lock = threading.Lock()
-
-    def wait_for_cooldown(self) -> float:
-        started = time.monotonic()
-        while True:
-            with self.lock:
-                delay = self.cooldown_until - time.monotonic()
-            if delay <= 0:
-                return time.monotonic() - started
-            time.sleep(delay)
-
-    def wait(self) -> float:
-        started = time.monotonic()
-        while True:
-            with self.lock:
-                now = time.monotonic()
-                delay = max(self.next_allowed, self.cooldown_until) - now
-                if delay <= 0:
-                    self.next_allowed = now + self.interval_seconds
-                    return time.monotonic() - started
-            time.sleep(delay)
-
-    def defer(self, seconds: float) -> None:
-        with self.lock:
-            self.cooldown_until = max(
-                self.cooldown_until,
-                time.monotonic() + max(0.0, float(seconds)),
-            )
 
 
 def load_rejected_domains() -> set[str]:
@@ -174,26 +137,15 @@ def normalize_proxy_url(proxy_url: str) -> str:
     )
 
 
-def resolve_proxy_templates(
-    proxies: dict | None,
-    platform: str = "",
-) -> dict | None:
+def resolve_proxy_templates(proxies: dict | None) -> dict | None:
     """为单次注册解析共享的 Resin 粘性会话 UUID。"""
     if not proxies:
         return None
     session_id = uuid4().hex
-    resolved = {}
-    for key, value in proxies.items():
-        normalized = normalize_proxy_url(value)
-        if platform:
-            normalized = re.sub(
-                r"(?<=://)[^.@:/]+(?=\.)",
-                platform,
-                normalized,
-                count=1,
-            )
-        resolved[key] = normalized.replace("{uuid}", session_id)
-    return resolved
+    return {
+        key: normalize_proxy_url(value).replace("{uuid}", session_id)
+        for key, value in proxies.items()
+    }
 
 
 def solve_turnstile(
@@ -459,8 +411,6 @@ class TodoforAI:
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
-        self.last_otp_retry_after = 0.0
-        self.last_otp_rate_limit_headers: dict[str, str] = {}
         self.proxy_url = str((proxies or {}).get("https") or (proxies or {}).get("http") or "")
         if proxies:
             self.session.proxies.update(proxies)
@@ -505,8 +455,6 @@ class TodoforAI:
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
-        self.last_otp_retry_after = 0.0
-        self.last_otp_rate_limit_headers = {}
         headers = {**self._api_headers(), "Content-Type": "application/json"}
         if captcha_token:
             headers["x-captcha-response"] = captcha_token
@@ -517,14 +465,6 @@ class TodoforAI:
             timeout=30,
         )
         self.last_otp_status = resp.status_code
-        self.last_otp_rate_limit_headers = {
-            key: value
-            for key, value in resp.headers.items()
-            if key.casefold() in {"retry-after", "x-ratelimit-reset", "ratelimit-reset"}
-        }
-        retry_after = resp.headers.get("Retry-After", "").strip()
-        if retry_after.isdigit():
-            self.last_otp_retry_after = float(retry_after)
         try:
             body = resp.json()
         except json.JSONDecodeError:
@@ -709,13 +649,7 @@ def process_one_account(
     domain: str = "",
     exclude_domains: list[str] | None = None,
     proxies: dict | None = None,
-    proxy_platforms: list[str] | None = None,
     turnstile_solver: Callable[[str], str] | None = None,
-    turnstile_mode: str = "auto",
-    otp_gate: RequestIntervalGate | None = None,
-    otp_cooldown_seconds: float = 3600,
-    network_gate: RequestIntervalGate | None = None,
-    network_cooldown_seconds: float = 60,
     max_retries: int = 5,
     proxy_attempts: int = 5,
     initial_delay: float = 0,
@@ -735,26 +669,14 @@ def process_one_account(
     if initial_delay > 0:
         time.sleep(initial_delay)
     failed_domains: list[str] = []
-    platforms = [str(value).strip() for value in (proxy_platforms or []) if str(value).strip()]
-    proxy_cursor = max(0, thread_id - 1)
-
-    def next_proxies() -> dict | None:
-        nonlocal proxy_cursor
-        platform = platforms[proxy_cursor % len(platforms)] if platforms else ""
-        proxy_cursor += 1
-        return resolve_proxy_templates(proxies, platform)
 
     for attempt in range(1, max_retries + 1):
         account: dict | None = None
         todo: TodoforAI | None = None
         try:
-            if otp_gate:
-                otp_gate.wait_for_cooldown()
-            if network_gate:
-                network_gate.wait_for_cooldown()
             last_session_error: Exception | None = None
             for proxy_attempt in range(1, max(1, proxy_attempts if proxies else 1) + 1):
-                candidate = TodoforAI(proxies=next_proxies())
+                candidate = TodoforAI(proxies=resolve_proxy_templates(proxies))
                 try:
                     if not candidate.init_anonymous_session():
                         raise requests.RequestException("匿名会话初始化失败")
@@ -768,12 +690,6 @@ def process_one_account(
                     if proxy_attempt < proxy_attempts:
                         log(thread_id, f"   当前代理或浏览器不可用，换 UUID... ({proxy_attempt}/{proxy_attempts})")
             if todo is None:
-                if network_gate:
-                    network_gate.defer(network_cooldown_seconds)
-                    log(
-                        thread_id,
-                        f"   全部代理平台不可用，全局冷却 {network_cooldown_seconds:g}s...",
-                    )
                 raise last_session_error or requests.RequestException("匿名会话初始化失败")
 
             # ── 1. 创建临时邮箱 ──
@@ -793,44 +709,19 @@ def process_one_account(
 
             # ── 2. 发送验证码 ──
             log(thread_id, "📤 发送 OTP...")
-            solve_first = turnstile_mode == "always" and turnstile_solver is not None
-            if not solve_first and otp_gate:
-                if otp_gate.wait() > 60:
-                    raise RuntimeError("OTP 冷却结束，重新创建邮箱以避免会话过期")
-            otp_sent = False if solve_first else todo.send_otp(email)
-            needs_browser = solve_first or (
-                not otp_sent
-                and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED"
-                and turnstile_solver is not None
-            )
-            if needs_browser:
+            otp_sent = todo.send_otp(email)
+            if not otp_sent and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED" and turnstile_solver:
                 challenge_error: Exception | None = None
                 challenge_attempts = max(1, proxy_attempts if proxies else 1)
                 for challenge_attempt in range(1, challenge_attempts + 1):
                     candidate = todo if challenge_attempt == 1 else TodoforAI(
-                        proxies=next_proxies()
+                        proxies=resolve_proxy_templates(proxies)
                     )
                     try:
                         if challenge_attempt > 1 and not candidate.init_anonymous_session():
                             raise requests.RequestException("匿名会话初始化失败")
-                        log(
-                            thread_id,
-                            "🧩 获取浏览器验证令牌..."
-                            if solve_first
-                            else "🧩 目标要求浏览器验证，获取令牌后重试...",
-                        )
-                        if otp_gate and otp_gate.wait_for_cooldown() > 60:
-                            challenge_error = RuntimeError(
-                                "全局冷却结束，重新创建邮箱以避免会话过期"
-                            )
-                            break
+                        log(thread_id, "🧩 目标要求浏览器验证，获取令牌后重试...")
                         captcha_token = turnstile_solver(candidate.proxy_url)
-                        if otp_gate:
-                            if otp_gate.wait() > 60:
-                                challenge_error = RuntimeError(
-                                    "OTP 冷却结束，重新创建邮箱和浏览器令牌"
-                                )
-                                break
                         otp_sent = candidate.send_otp(email, captcha_token)
                         if (
                             not otp_sent
@@ -880,25 +771,6 @@ def process_one_account(
                         continue
                     return None
 
-                if getattr(todo, "last_otp_status", 0) == 429:
-                    cooldown_seconds = max(
-                        otp_cooldown_seconds,
-                        float(getattr(todo, "last_otp_retry_after", 0) or 0),
-                    )
-                    if otp_gate:
-                        otp_gate.defer(cooldown_seconds)
-                    if attempt < max_retries:
-                        if cooldown_seconds > 0:
-                            log(
-                                thread_id,
-                                f"   目标接口限速，全局冷却 {cooldown_seconds:g}s 后重试"
-                                f"；响应头: {getattr(todo, 'last_otp_rate_limit_headers', {})}",
-                            )
-                        else:
-                            log(thread_id, "   当前出口限速，更换邮箱、UUID 和平台后重试...")
-                        continue
-                    return None
-
                 non_retryable = error_code in {"CAPTCHA_REQUIRED"} or any(
                     text in normalized_message
                     for text in ("browser verification", "captcha")
@@ -943,19 +815,15 @@ def process_one_account(
             user = login_result["user"]
             log(thread_id, f"✅ 登录成功! user_id={user.get('id')}  isAnonymous={user.get('isAnonymous')}")
 
+            # 短暂等待
+            time.sleep(1)
+
             # ── 6. 获取 API Key ──
             log(thread_id, "🔑 获取 API Key...")
 
             try:
-                api_keys = []
-                default_key = None
-                for key_attempt in range(1, 4):
-                    api_keys = todo.get_api_keys()
-                    default_key = None if api_keys else todo.get_default_api_key()
-                    if api_keys or default_key:
-                        break
-                    if key_attempt < 3:
-                        time.sleep(1)
+                api_keys = todo.get_api_keys()
+                default_key = None if api_keys else todo.get_default_api_key()
 
                 # 日志只保留结构信息，避免输出完整 API Key。
                 log(thread_id, f"   apiKey.list → {len(api_keys)} 个")
@@ -1048,60 +916,6 @@ def save_result(result: dict):
     log(result["thread_id"], f"💾 已写入 {OUTPUT_FILE.name} ({written} 个 key)")
 
 
-def run_concurrent_accounts(
-    target_count: int,
-    workers: int,
-    worker: Callable[[int, float], dict | None],
-) -> tuple[int, int]:
-    """维持滚动并发，失败任务自动补位直到达到成功目标。"""
-    success = 0
-    failed = 0
-    attempted = 0
-    next_task_id = 1
-    pool = ThreadPoolExecutor(max_workers=workers)
-    future_map = {}
-
-    def fill_slots() -> None:
-        nonlocal next_task_id
-        slots = min(workers, target_count - success) - len(future_map)
-        for _ in range(max(0, slots)):
-            task_id = next_task_id
-            next_task_id += 1
-            initial_delay = (task_id - 1) * 1.5 if task_id <= workers else 0
-            future_map[pool.submit(worker, task_id, initial_delay)] = task_id
-
-    fill_slots()
-    try:
-        while future_map:
-            completed, _ = wait(future_map, return_when=FIRST_COMPLETED)
-            for future in completed:
-                attempted += 1
-                task_id = future_map.pop(future)
-                try:
-                    result = future.result()
-                except Exception as error:
-                    log(task_id, f"❌ 线程崩溃: {error}")
-                    result = None
-                if result:
-                    save_result(result)
-                    success += 1
-                else:
-                    failed += 1
-                print(
-                    f"    成功进度: {success}/{target_count}  "
-                    f"尝试: {attempted}  失败重试: {failed}"
-                )
-            fill_slots()
-    except KeyboardInterrupt:
-        for future in future_map:
-            future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    else:
-        pool.shutdown(wait=True)
-    return success, failed
-
-
 # ============================================================
 # 主入口
 # ============================================================
@@ -1122,7 +936,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
         """,
     )
     parser.add_argument("-n", "--count", type=int, default=1,
-                        help="成功注册目标数量（默认: 1）")
+                        help="注册数量（默认: 1）")
     parser.add_argument("-t", "--threads", type=int, default=1,
                         help="并发线程数（默认: 1）")
     parser.add_argument("-k", "--api-key", type=str, default="",
@@ -1141,20 +955,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                         help="固定 MailPoolHub 下游渠道（推荐: mailgw）")
     parser.add_argument("--proxy-url", type=str, default="",
                         help="目标业务代理 URL，支持 {uuid} Resin 粘性会话模板")
-    parser.add_argument("--proxy-platforms", type=str, default="",
-                        help="逗号分隔的 Resin 平台轮换列表")
     parser.add_argument("--max-retries", type=int, default=5,
                         help="每个账号最大尝试次数（默认: 5）")
     parser.add_argument("--turnstile-concurrency", type=int, default=0,
                         help="浏览器验证并发数（默认: min(线程数, 2)）")
-    parser.add_argument("--turnstile-mode", choices=("always", "auto", "off"), default="",
-                        help="浏览器验证模式（默认: always）")
-    parser.add_argument("--otp-interval", type=float, default=-1,
-                        help="OTP 提交最小间隔秒数（默认: 40）")
-    parser.add_argument("--otp-cooldown", type=float, default=-1,
-                        help="无 Retry-After 时的 HTTP 429 全局冷却秒数（默认: 3600）")
-    parser.add_argument("--network-cooldown", type=float, default=-1,
-                        help="全部代理平台不可用时的全局冷却秒数（默认: 60）")
     parser.add_argument("--check-mail-provider", action="store_true",
                         help="检查当前临时邮箱渠道并退出")
     parser.add_argument("--list-domains", action="store_true",
@@ -1188,44 +992,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
         except ValueError as error:
             print(f"❌ 代理配置错误：{error}")
             sys.exit(1)
-    configured_platforms = args.proxy_platforms or cfg.get("proxy_platforms") or ""
-    if isinstance(configured_platforms, str):
-        configured_platforms = configured_platforms.split(",")
-    elif not isinstance(configured_platforms, list):
-        configured_platforms = []
-    proxy_platforms = [
-        str(value).strip()
-        for value in configured_platforms
-        if str(value).strip()
-    ]
 
     turnstile_cfg = cfg.get("turnstile") if isinstance(cfg.get("turnstile"), dict) else {}
-    turnstile_mode = str(
-        args.turnstile_mode or turnstile_cfg.get("mode") or "always"
-    ).strip().lower()
-    if not turnstile_cfg.get("enabled", True):
-        turnstile_mode = "off"
-    if turnstile_mode not in {"always", "auto", "off"}:
-        parser.error("turnstile.mode 必须是 always、auto 或 off")
-    otp_interval = (
-        args.otp_interval
-        if args.otp_interval >= 0
-        else float(cfg.get("otp_interval_seconds", 40))
-    )
-    otp_cooldown = (
-        args.otp_cooldown
-        if args.otp_cooldown >= 0
-        else float(cfg.get("otp_cooldown_seconds", 3600))
-    )
-    otp_gate = RequestIntervalGate(otp_interval) if otp_interval > 0 else None
-    network_cooldown = (
-        args.network_cooldown
-        if args.network_cooldown >= 0
-        else float(cfg.get("network_cooldown_seconds", 60))
-    )
-    network_gate = RequestIntervalGate(0)
     turnstile_solver = None
-    if turnstile_mode != "off":
+    if turnstile_cfg.get("enabled", True):
         turnstile_concurrency = args.turnstile_concurrency or int(
             turnstile_cfg.get("max_concurrency") or min(args.threads, 2)
         )
@@ -1306,13 +1076,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"{'=' * 55}")
     print(f"  邮箱渠道 : {provider_label}")
     print(f"  代理     : {'已配置' if proxies else '无（直连）'}")
-    if proxy_platforms:
-        print(f"  平台轮换 : {', '.join(proxy_platforms)}")
-    print(f"  浏览器模式: {turnstile_mode}")
-    print(f"  OTP 间隔  : {otp_interval:g}s")
-    print(f"  429 冷却  : {otp_cooldown:g}s")
-    print(f"  网络冷却 : {network_cooldown:g}s")
-    print(f"  成功目标 : {args.count}")
+    print(f"  注册数量 : {args.count}")
     print(f"  线程数   : {args.threads}")
     print(f"  重试次数 : {args.max_retries}")
     print(f"  输出文件 : {OUTPUT_FILE}")
@@ -1325,46 +1089,73 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     workers = min(args.threads, args.count)
 
-    def registration_worker(task_id: int, initial_delay: float = 0) -> dict | None:
-        return process_one_account(
-            task_id,
-            mail_provider_factory,
-            domain=domain,
-            exclude_domains=exclude_domains,
-            proxies=proxies,
-            proxy_platforms=proxy_platforms,
-            turnstile_solver=turnstile_solver,
-            turnstile_mode=turnstile_mode,
-            otp_gate=otp_gate,
-            otp_cooldown_seconds=otp_cooldown,
-            network_gate=network_gate,
-            network_cooldown_seconds=network_cooldown,
-            max_retries=args.max_retries,
-            initial_delay=initial_delay,
-            verbose=args.verbose,
-        )
-
     if workers <= 1:
-        attempted = 0
-        while success < args.count:
-            attempted += 1
+        # 单线程
+        for i in range(1, args.count + 1):
             print(f"\n{'─' * 45}")
-            print(f"  成功进度 [{success}/{args.count}]  尝试 {attempted}")
-            result = registration_worker(attempted)
+            print(f"  [{i}/{args.count}]")
+            result = process_one_account(
+                i,
+                mail_provider_factory,
+                domain=domain,
+                exclude_domains=exclude_domains,
+                proxies=proxies,
+                turnstile_solver=turnstile_solver,
+                max_retries=args.max_retries,
+                verbose=args.verbose,
+            )
             if result:
                 save_result(result)
                 success += 1
             else:
                 failed += 1
-            if success < args.count:
+            if i < args.count:
                 time.sleep(2)
     else:
+        # 多线程
         print(f"  启动 {workers} 个线程...\n")
-        success, failed = run_concurrent_accounts(
-            args.count,
-            workers,
-            registration_worker,
-        )
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            future_map = {
+                pool.submit(
+                    process_one_account,
+                    i,
+                    mail_provider_factory,
+                    domain=domain,
+                    exclude_domains=exclude_domains,
+                    proxies=proxies,
+                    turnstile_solver=turnstile_solver,
+                    max_retries=args.max_retries,
+                    initial_delay=(i - 1) * 1.5 if i <= workers else 0,
+                    verbose=args.verbose,
+                ): i
+                for i in range(1, args.count + 1)
+            }
+
+            done = 0
+            for future in as_completed(future_map):
+                done += 1
+                tid = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    log(tid, f"❌ 线程崩溃: {e}")
+                    result = None
+
+                if result:
+                    save_result(result)
+                    success += 1
+                else:
+                    failed += 1
+
+                print(f"    总进度: {done}/{args.count}  成功: {success}  失败: {failed}")
+        except KeyboardInterrupt:
+            for future in future_map:
+                future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            pool.shutdown(wait=True)
 
     # ── 汇总 ──
     elapsed = time.time() - start_time
@@ -1372,10 +1163,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"  执行完成")
     print(f"  耗时   : {elapsed:.1f}s")
     print(f"  成功   : {success}")
-    print(f"  失败重试: {failed}")
+    print(f"  失败   : {failed}")
     print(f"  结果   : {OUTPUT_FILE}")
     print(f"{'=' * 55}")
-    return 0 if success == args.count else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

@@ -20,8 +20,13 @@
     "http": "http://us.{uuid}:proxy_token@127.0.0.1:9200",
     "https": "http://us.{uuid}:proxy_token@127.0.0.1:9200"
   },
+  "proxy_platforms": ["node", "jp", "us", "de", "github", "baokemeng"],
+  "otp_interval_seconds": 40,
+  "otp_cooldown_seconds": 3600,
+  "network_cooldown_seconds": 60,
   "turnstile": {
     "enabled": true,
+    "mode": "always",
     "site_key": "0x4AAAAAAEP6KBMVDx9FVTzd",
     "browser_channel": "chrome",
     "headless": false,

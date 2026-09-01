@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import threading
@@ -303,6 +304,67 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(["blocked.test"], provider.created_exclude_domains)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
 
+    def test_request_interval_gate_spaces_concurrent_submissions(self) -> None:
+        """验证 OTP 门按配置间隔排队。"""
+        gate = main.RequestIntervalGate(7)
+        with patch.object(
+            main.time,
+            "monotonic",
+            side_effect=[10, 10, 10, 12, 12, 17, 17],
+        ), patch.object(
+            main.time, "sleep"
+        ) as sleep:
+            gate.wait()
+            gate.wait()
+        sleep.assert_called_once_with(5)
+
+    def test_request_interval_gate_reports_cooldown_wait(self) -> None:
+        """验证长冷却可通知注册流程刷新已过期邮箱。"""
+        gate = main.RequestIntervalGate(40)
+        gate.cooldown_until = 100
+        with patch.object(
+            main.time, "monotonic", side_effect=[0, 0, 100, 100]
+        ), patch.object(main.time, "sleep") as sleep:
+            waited = gate.wait_for_cooldown()
+        self.assertEqual(100, waited)
+        sleep.assert_called_once_with(100)
+
+    def test_concurrent_failures_are_replaced_until_success_target(self) -> None:
+        """验证失败任务会补位，且在途任务不会超过剩余成功数。"""
+        calls: list[int] = []
+
+        def worker(task_id: int, _initial_delay: float) -> dict | None:
+            calls.append(task_id)
+            return None if task_id <= 2 else {"thread_id": task_id}
+
+        with patch.object(main, "save_result") as save:
+            success, failed = main.run_concurrent_accounts(3, 3, worker)
+
+        self.assertEqual((3, 2), (success, failed))
+        self.assertEqual(5, len(calls))
+        self.assertEqual(3, save.call_count)
+
+    def test_exhausted_proxy_platforms_trigger_network_cooldown(self) -> None:
+        """验证全部代理失败时触发共享网络熔断。"""
+        gate = Mock()
+        gate.wait_for_cooldown.return_value = 0
+
+        with patch.object(main, "TodoforAI", _AlwaysInitFailsTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                proxies={"https": "http://node.{uuid}:token@127.0.0.1:9200"},
+                network_gate=gate,
+                network_cooldown_seconds=60,
+                proxy_attempts=2,
+                max_retries=1,
+            )
+
+        self.assertIsNone(result)
+        gate.defer.assert_called_once_with(60)
+
     def test_failure_also_closes_provider_account(self) -> None:
         """验证 OTP 发送失败时同样删除已创建邮箱。"""
         provider = _FakeMailProvider()
@@ -363,6 +425,35 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNotNone(result)
         solver.assert_not_called()
 
+    def test_always_mode_sends_first_otp_with_browser_token(self) -> None:
+        """验证 always 模式不会先发送必然失败的无令牌请求。"""
+        tokens: list[str] = []
+
+        class BrowserFirstTodoforAI(_FakeTodoforAI):
+            def send_otp(self, email: str, captcha_token: str = "") -> bool:
+                tokens.append(captcha_token)
+                return captcha_token == "turnstile-token"
+
+        otp_gate = Mock()
+        otp_gate.wait_for_cooldown.return_value = 0
+        otp_gate.wait.return_value = 0
+        with patch.object(main, "TodoforAI", BrowserFirstTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=Mock(return_value="turnstile-token"),
+                turnstile_mode="always",
+                otp_gate=otp_gate,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(["turnstile-token"], tokens)
+        self.assertEqual(2, otp_gate.wait_for_cooldown.call_count)
+        otp_gate.wait.assert_called_once_with()
+
     def test_anonymous_session_failure_rotates_before_creating_mailbox(self) -> None:
         """验证坏代理会在创建邮箱前换 UUID。"""
         provider = _FakeMailProvider()
@@ -391,6 +482,7 @@ class RegistrationFlowTest(unittest.TestCase):
                 1,
                 lambda: provider,
                 proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
+                proxy_platforms=["jp", "us"],
                 turnstile_solver=solver,
                 max_retries=1,
             )
@@ -399,6 +491,8 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(2, solver.call_count)
         self.assertEqual(1, provider.create_count)
         self.assertNotEqual(solver.call_args_list[0].args[0], solver.call_args_list[1].args[0])
+        self.assertTrue(main.urlparse(solver.call_args_list[0].args[0]).username.startswith("jp."))
+        self.assertTrue(main.urlparse(solver.call_args_list[1].args[0]).username.startswith("us."))
 
     def test_missing_api_key_is_not_counted_as_success(self) -> None:
         """验证登录成功但无 Key 时会重试而不是返回伪成功。"""
@@ -435,6 +529,70 @@ class RegistrationFlowTest(unittest.TestCase):
 
         self.assertEqual([default_key], result["api_keys"])
         get_default.assert_called_once_with()
+
+    def test_delayed_api_key_is_polled_without_recreating_account(self) -> None:
+        """验证 Key 延迟生成时短轮询而不是重新注册。"""
+        provider = _FakeMailProvider()
+
+        class DelayedKeyTodoforAI(_FakeTodoforAI):
+            calls = 0
+
+            def get_api_keys(self) -> list[dict]:
+                type(self).calls += 1
+                return [] if type(self).calls == 1 else super().get_api_keys()
+
+            def get_default_api_key(self) -> dict | None:
+                return None
+
+        with patch.object(main, "TodoforAI", DelayedKeyTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(1, lambda: provider, max_retries=1)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, DelayedKeyTodoforAI.calls)
+        self.assertEqual(1, provider.create_count)
+
+    def test_rate_limit_retries_without_blacklisting_domain(self) -> None:
+        """验证 429 会退避重试但不会误判邮箱域名。"""
+        provider = _FakeMailProvider()
+        _RateLimitThenSuccessTodoforAI.instances = 0
+        otp_gate = Mock()
+        otp_gate.wait.return_value = 0
+
+        with patch.object(main, "TodoforAI", _RateLimitThenSuccessTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                otp_gate=otp_gate,
+                otp_cooldown_seconds=600,
+                max_retries=2,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertNotIn("mail.test", provider.created_exclude_domains or [])
+        otp_gate.defer.assert_called_once_with(600)
+
+    def test_cooldown_race_refreshes_mailbox_before_otp_submission(self) -> None:
+        """验证冷却在 token 生成期间触发时不会提交过期邮箱。"""
+        todo = _CaptchaThenSuccessTodoforAI
+        otp_gate = Mock()
+        otp_gate.wait_for_cooldown.return_value = 0
+        otp_gate.wait.return_value = 3600
+
+        with patch.object(main, "TodoforAI", todo), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=Mock(return_value="turnstile-token"),
+                turnstile_mode="always",
+                otp_gate=otp_gate,
+                max_retries=1,
+            )
+
+        self.assertIsNone(result)
 
     def test_save_result_appends_to_existing_key_file(self) -> None:
         """验证新一轮注册不会覆盖之前保存的 API Key。"""
@@ -505,6 +663,7 @@ class RegistrationFlowTest(unittest.TestCase):
         """验证 OTP 接口错误码和错误消息会传递给注册流程。"""
         todo = main.TodoforAI()
         response = Mock(status_code=400)
+        response.headers = {"Retry-After": "1200", "X-RateLimit-Reset": "fixture-reset"}
         response.json.return_value = {
             "code": "CAPTCHA_REQUIRED",
             "message": "Browser verification failed.",
@@ -515,11 +674,14 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual("CAPTCHA_REQUIRED", todo.last_otp_error_code)
         self.assertEqual("Browser verification failed.", todo.last_otp_error_message)
         self.assertEqual(400, todo.last_otp_status)
+        self.assertEqual(1200, todo.last_otp_retry_after)
+        self.assertEqual("fixture-reset", todo.last_otp_rate_limit_headers["X-RateLimit-Reset"])
 
     def test_send_otp_adds_captcha_header(self) -> None:
         """验证浏览器令牌通过目标网页使用的请求头提交。"""
         todo = main.TodoforAI()
         response = Mock(status_code=200)
+        response.headers = {}
         response.json.return_value = {"success": True}
         todo.session.post = Mock(return_value=response)
 
@@ -558,6 +720,16 @@ class RegistrationFlowTest(unittest.TestCase):
         proxy = "http://node.{uuid}:fixture-token@127.0.0.1:9200"
         self.assertEqual(proxy, main.normalize_proxy_url(proxy))
 
+    def test_resin_platform_is_replaced_before_uuid_resolution(self) -> None:
+        """验证同一 Resin 模板可以轮换平台并保持粘性 UUID。"""
+        proxies = main.resolve_proxy_templates(
+            {"https": "http://node.{uuid}:fixture-token@127.0.0.1:9200"},
+            "jp",
+        )
+        parsed = main.urlparse(proxies["https"])
+        self.assertTrue(parsed.username.startswith("jp."))
+        self.assertNotIn("{uuid}", parsed.username)
+
     def test_invalid_proxy_url_is_rejected(self) -> None:
         """验证无法识别的代理配置会在批量任务启动前失败。"""
         with self.assertRaisesRegex(ValueError, "代理 URL 无效"):
@@ -571,15 +743,25 @@ class RegistrationFlowTest(unittest.TestCase):
                 "threads": 3,
                 "max_retries": 6,
                 "turnstile_concurrency": 2,
+                "turnstile_mode": "always",
+                "otp_interval_seconds": 40,
+                "otp_cooldown_seconds": 3600,
+                "network_cooldown_seconds": 60,
                 "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
                 "mailpoolhub_provider": "mailgw",
                 "proxy_url": "http://jp.{uuid}:token@127.0.0.1:9200",
+                "proxy_platforms": "node,jp,us",
             }
         )
         self.assertIn("--count", command)
         self.assertEqual("10", command[command.index("--count") + 1])
         self.assertEqual("3", command[command.index("--threads") + 1])
         self.assertEqual("mailgw", command[command.index("--mailpoolhub-provider") + 1])
+        self.assertEqual("always", command[command.index("--turnstile-mode") + 1])
+        self.assertEqual("40", command[command.index("--otp-interval") + 1])
+        self.assertEqual("3600", command[command.index("--otp-cooldown") + 1])
+        self.assertEqual("60", command[command.index("--network-cooldown") + 1])
+        self.assertEqual("node,jp,us", command[command.index("--proxy-platforms") + 1])
 
     def test_interactive_launcher_remembers_settings(self) -> None:
         """验证启动器配置可原子保存并在下次启动复用。"""
@@ -616,15 +798,25 @@ class RegistrationFlowTest(unittest.TestCase):
     def test_interactive_launcher_force_stops_child_on_ctrl_c(self) -> None:
         """验证 Ctrl+C 会终止注册及浏览器进程树并返回 130。"""
         process = Mock()
+        process.stdout = io.StringIO("")
         process.wait.side_effect = KeyboardInterrupt
         with patch.object(start_reg.subprocess, "Popen", return_value=process) as popen, patch.object(
             start_reg, "terminate_process_tree"
-        ) as terminate:
+        ) as terminate, patch.object(start_reg, "relay_output"):
             result = start_reg.run_registration(["python", "main.py"], {})
         self.assertEqual(130, result)
         terminate.assert_called_once_with(process)
         popen_options = popen.call_args.kwargs
         self.assertEqual(start_reg.subprocess.CREATE_NEW_PROCESS_GROUP, popen_options["creationflags"])
+
+    def test_registration_log_rotates_at_configured_size(self) -> None:
+        """验证注册日志达到上限后轮转且单文件不超过限制。"""
+        with tempfile.TemporaryDirectory() as directory, patch("builtins.print"):
+            path = Path(directory) / "start_reg.log"
+            start_reg.relay_output(io.StringIO(("x" * 32 + "\n") * 20), path, 256)
+            files = [path, path.with_name(path.name + ".1")]
+            self.assertTrue(all(file.exists() for file in files))
+            self.assertTrue(all(file.stat().st_size <= 256 for file in files))
 
     def test_windows_launcher_is_ascii_crlf(self) -> None:
         """防止 cmd.exe 将 UTF-8/LF 批处理错误解析为残缺命令。"""
@@ -803,6 +995,13 @@ class _InitFailsOnceTodoforAI(_FakeTodoforAI):
         return type(self).instances > 1
 
 
+class _AlwaysInitFailsTodoforAI(_FakeTodoforAI):
+    """模拟所有代理平台均无法初始化会话。"""
+
+    def init_anonymous_session(self) -> bool:
+        return False
+
+
 class _NoKeysThenSuccessTodoforAI(_FakeTodoforAI):
     """模拟首次登录后 API Key 尚未创建。"""
 
@@ -817,6 +1016,24 @@ class _NoKeysThenSuccessTodoforAI(_FakeTodoforAI):
 
     def get_default_api_key(self) -> dict | None:
         return None if type(self).instances == 1 else super().get_default_api_key()
+
+
+class _RateLimitThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟首个会话触发 OTP 限速、第二个会话成功。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
+        if type(self).instances > 1:
+            return True
+        self.last_otp_error_code = "HTTP_429"
+        self.last_otp_error_message = "Too many sign-in attempts."
+        self.last_otp_status = 429
+        return False
 
 
 if __name__ == "__main__":
