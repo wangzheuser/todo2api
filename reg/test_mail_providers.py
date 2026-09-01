@@ -411,6 +411,31 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(2, provider.create_count)
 
+    def test_default_api_key_request_is_skipped_when_list_has_key(self) -> None:
+        """验证列表已有 Key 时不再发送冗余的默认 Key 请求。"""
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            _FakeTodoforAI,
+            "get_default_api_key",
+            side_effect=AssertionError("redundant getDefault request"),
+        ) as get_default, patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, _FakeMailProvider, max_retries=1)
+
+        self.assertIsNotNone(result)
+        get_default.assert_not_called()
+
+    def test_default_api_key_remains_fallback_when_list_is_empty(self) -> None:
+        """验证列表为空时仍通过默认 Key 完成注册。"""
+        default_key = {"key": "fixture-api-key-value"}
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            _FakeTodoforAI, "get_api_keys", return_value=[]
+        ), patch.object(
+            _FakeTodoforAI, "get_default_api_key", return_value=default_key
+        ) as get_default, patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, _FakeMailProvider, max_retries=1)
+
+        self.assertEqual([default_key], result["api_keys"])
+        get_default.assert_called_once_with()
+
     def test_save_result_appends_to_existing_key_file(self) -> None:
         """验证新一轮注册不会覆盖之前保存的 API Key。"""
         with tempfile.TemporaryDirectory() as directory:

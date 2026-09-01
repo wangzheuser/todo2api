@@ -1,0 +1,30 @@
+CHANGED_BRANCH: dev
+CHANGED_FIELD: first-wave-only worker staggering, conditional apiKey.getDefault fallback, and explicit Turnstile retry errors
+
+ARTIFACTS:
+MODIFIED_FILE: D:/projects/github/todo2api/work/registration-efficiency/MODIFIED_FILE
+DIFF_FILE: D:/projects/github/todo2api/work/registration-efficiency/DIFF_FILE
+VERIFICATION.txt: D:/projects/github/todo2api/work/registration-efficiency/VERIFICATION.txt
+ROLLBACK.sh: D:/projects/github/todo2api/work/registration-efficiency/ROLLBACK.sh
+
+ORIGINAL_SHA256: 89d6064bb4b29284c4c961a7cd88f761c822e9f7356a01e5f0291eacf5dc8f35
+MODIFIED_SHA256: 45dd292625ee6b42d751ab0a0acd6f6595b5e1f062e58d0ab0af4ef7bbc8445e
+
+BASELINE:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: dev 6ceb28075d20e3fa8accb20ec8103183bc3cc482, reg sources before efficiency changes
+LITERAL_OUTPUT_RESULT: Ran 33 tests in 1.677s / OK
+EXIT_STATUS: 0
+
+MODIFIED:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: current reg/main.py, reg/mail_providers.py, reg/start_reg.py, reg/test_mail_providers.py
+LITERAL_OUTPUT_RESULT: Ran 35 tests in 1.628s / OK; list-present getDefault calls=0; list-empty getDefault calls=1
+EXIT_STATUS: 0
+
+ROLLBACK:
+COMMAND: C:/Program Files/Git/bin/bash.exe -lc "ROLLBACK.sh ROLLBACK_TEST_FILE"
+INPUT: ROLLBACK_TEST_FILE copied from MODIFIED_FILE, SHA256 45dd292625ee6b42d751ab0a0acd6f6595b5e1f062e58d0ab0af4ef7bbc8445e
+LITERAL_OUTPUT_RESULT: 89d6064bb4b29284c4c961a7cd88f761c822e9f7356a01e5f0291eacf5dc8f35 *ROLLBACK_TEST_FILE / ROLLBACK_EXIT=0
+EXIT_STATUS: 0
+RESTORED_BEHAVIOR_STATUS: rollback test copy matches the original main.py hash; MODIFIED_FILE remains changed with SHA256 45dd292625ee6b42d751ab0a0acd6f6595b5e1f062e58d0ab0af4ef7bbc8445e.
