@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"todo2api/internal/config"
+	"todo2api/internal/modelcatalog"
 	"todo2api/internal/pool"
 	"todo2api/internal/storage"
 )
@@ -59,6 +60,36 @@ upstream: {base_url: "http://127.0.0.1:1/api/v1", poll_timeout: 1s}
 		store.Close()
 	})
 	return service, mux, store
+}
+
+func TestModelsCatalogRequiresLoginAndReturnsStaticModels(t *testing.T) {
+	_, mux, _ := testService(t)
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/api/models", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", recorder.Code)
+	}
+
+	cookie := login(t, mux)
+	request = httptest.NewRequest(http.MethodGet, "http://example.test/api/models", nil)
+	request.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("models status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response modelcatalog.Response
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Total != 53 || response.Available != 0 || response.AvailabilityComplete {
+		t.Fatalf("response = %#v", response)
+	}
+	if len(response.Models) != response.Total || response.Models[0].Pricing == nil {
+		t.Fatalf("models = %#v", response.Models)
+	}
 }
 
 func TestProxyHeadersRequireExplicitTrust(t *testing.T) {

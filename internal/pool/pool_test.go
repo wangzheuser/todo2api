@@ -260,6 +260,9 @@ func TestNewKeepsAccountWhenModelDiscoveryFails(t *testing.T) {
 	if p.Pick() == nil || len(p.Models()) != 0 || len(p.Warnings()) != 1 {
 		t.Fatalf("account=%#v models=%#v warnings=%#v", p.Pick(), p.Models(), p.Warnings())
 	}
+	if p.ModelCatalogComplete() {
+		t.Fatal("failed model discovery was marked complete")
+	}
 }
 
 func TestNewHidesDynamicModelsWhenAnyAccountDiscoveryFails(t *testing.T) {
@@ -345,6 +348,9 @@ func TestNewSkipsUnusableAccountsAndPreservesOrder(t *testing.T) {
 	}
 	if len(p.Models()) != 1 || p.Models()[0].ID != "gpt-5.6-sol" {
 		t.Fatalf("models = %#v", p.Models())
+	}
+	if !p.ModelCatalogComplete() {
+		t.Fatal("successful startup model discovery was marked incomplete")
 	}
 }
 

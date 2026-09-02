@@ -55,3 +55,45 @@ export interface ModelStatsResponse {
   models: string[];
   daily: Record<string, ModelStatPoint[]>;
 }
+
+export interface ModelPricePair {
+  input: number;
+  output: number;
+  combined?: number;
+}
+
+export interface ModelPricing {
+  currency: "USD";
+  unit: "per_1m_tokens";
+  base: ModelPricePair;
+  current: Required<ModelPricePair>;
+  discount_percent: number;
+  promotion_ends_at?: string;
+  snapshot_at: string;
+}
+
+export interface CatalogModel {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: string;
+  name?: string;
+  canonical_id?: string;
+  provider?: string;
+  context_length?: number;
+  max_completion_tokens?: number;
+  available: boolean;
+  availability_reason?:
+    | "no_active_accounts"
+    | "catalog_incomplete"
+    | "not_common_to_pool";
+  pricing?: ModelPricing;
+}
+
+export interface ModelCatalogResponse {
+  models: CatalogModel[];
+  total: number;
+  available: number;
+  availability_complete: boolean;
+  pricing_updated_at: string;
+}

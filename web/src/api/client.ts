@@ -1,4 +1,9 @@
-import type { Account, DashboardStats, ModelStatsResponse } from "@/types";
+import type {
+  Account,
+  DashboardStats,
+  ModelCatalogResponse,
+  ModelStatsResponse,
+} from "@/types";
 
 const BASE = "/api";
 
@@ -95,6 +100,10 @@ export const api = {
 
   getModelStats(days = 30): Promise<ModelStatsResponse> {
     return apiFetch<ModelStatsResponse>(`/stats/models?days=${days}`);
+  },
+
+  getModels(): Promise<ModelCatalogResponse> {
+    return apiFetch<ModelCatalogResponse>("/models");
   },
 
   deleteAccount(id: number): Promise<void> {

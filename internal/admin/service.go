@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"todo2api/internal/config"
+	"todo2api/internal/modelcatalog"
 	"todo2api/internal/pool"
 	"todo2api/internal/storage"
 	"todo2api/internal/upstream"
@@ -31,6 +32,7 @@ type Service struct {
 	cfg            *config.Config
 	store          *storage.Store
 	pool           *pool.Pool
+	modelCatalog   *modelcatalog.Service
 	ctx            context.Context
 	hub            *eventHub
 	loginMu        sync.Mutex
@@ -88,7 +90,10 @@ func New(cfg *config.Config, store *storage.Store, p *pool.Pool, contexts ...con
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx = contexts[0]
 	}
-	s := &Service{cfg: cfg, store: store, pool: p, ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{}}
+	s := &Service{
+		cfg: cfg, store: store, pool: p, modelCatalog: modelcatalog.NewService(p, cfg.Models.Aliases),
+		ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{},
+	}
 	for _, cidr := range cfg.Web.TrustedProxies {
 		_, network, err := net.ParseCIDR(cidr)
 		if err == nil {
@@ -116,7 +121,17 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/accounts/", s.requireAuth(s.sameOrigin(s.handleAccount)))
 	mux.HandleFunc("/api/stats", s.requireAuth(s.handleStats))
 	mux.HandleFunc("/api/stats/models", s.requireAuth(s.handleModelStats))
+	mux.HandleFunc("/api/models", s.requireAuth(s.handleModels))
 	mux.HandleFunc("/api/events", s.requireAuth(s.handleEvents))
+}
+
+// handleModels returns the pricing catalog with current account-pool availability.
+func (s *Service) handleModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.modelCatalog.Models())
 }
 
 type bulkAccountResult struct {

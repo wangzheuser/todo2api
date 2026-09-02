@@ -157,21 +157,22 @@ func (a *Account) releaseInit() {
 }
 
 type Pool struct {
-	accounts      []*Account
-	configured    []*Account
-	strategy      string
-	rr            uint64
-	mu            sync.Mutex // serializes Warm progress and ReloadKeys planning
-	reconcileMu   sync.Mutex
-	readyMu       sync.RWMutex
-	models        []upstream.ModelInfo
-	modelByID     map[string]upstream.ModelInfo
-	modelByRunner map[string]upstream.ModelInfo
-	publicIDByID  map[string]string
-	warnings      []error
-	cfg           *config.Config
-	repo          AccountRepository
-	warmStart     int
+	accounts             []*Account
+	configured           []*Account
+	strategy             string
+	rr                   uint64
+	mu                   sync.Mutex // serializes Warm progress and ReloadKeys planning
+	reconcileMu          sync.Mutex
+	readyMu              sync.RWMutex
+	models               []upstream.ModelInfo
+	modelByID            map[string]upstream.ModelInfo
+	modelByRunner        map[string]upstream.ModelInfo
+	publicIDByID         map[string]string
+	warnings             []error
+	cfg                  *config.Config
+	repo                 AccountRepository
+	warmStart            int
+	modelCatalogComplete atomic.Bool
 }
 
 func (p *Pool) SetRepository(repo AccountRepository) {
@@ -273,6 +274,7 @@ func New(cfg *config.Config, repositories ...AccountRepository) (*Pool, error) {
 	} else {
 		p.setModels(nil)
 	}
+	p.modelCatalogComplete.Store(len(catalogs) > 0 && len(catalogs) == p.Len())
 	return p, nil
 }
 
@@ -394,6 +396,11 @@ func initializeAccount(ctx context.Context, cfg *config.Config, account *Account
 // unambiguous public aliases. An incomplete discovery yields no dynamic list.
 func (p *Pool) Models() []upstream.ModelInfo {
 	return append([]upstream.ModelInfo(nil), p.models...)
+}
+
+// ModelCatalogComplete reports whether the published catalog was derived without a discovery gap.
+func (p *Pool) ModelCatalogComplete() bool {
+	return p.modelCatalogComplete.Load()
 }
 
 // Model finds model metadata by public alias, full upstream ID, or runner ID.

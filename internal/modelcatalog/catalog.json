@@ -1,0 +1,958 @@
+{
+  "schema_version": 1,
+  "snapshot_at": "2026-09-01T00:00:00.000Z",
+  "source": {
+    "page": "https://todofor.ai/models",
+    "models_asset": "https://todofor.ai/assets/models_data-ChBrONX2.js",
+    "models_sha256": "4ec153f5c16f4fb252308fc786529b1beb75e6bc5ebee078fab08aa74865edfc",
+    "discounts_asset": "https://todofor.ai/assets/modelDiscounts-gdONTQ4M.js",
+    "discounts_sha256": "4a6eab8de684bd4abfabc17f38b38b00cdb5c0715956584b10bbb7c4b0f842e7"
+  },
+  "models": [
+    {
+      "canonical_id": "anthropic/claude-fable-5",
+      "public_id": "claude-fable-5",
+      "name": "Anthropic: Claude Fable 5",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1781007515,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 10,
+          "output": 50
+        },
+        "promotion": {
+          "discount_percent": 50,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-haiku-4.5",
+      "public_id": "claude-haiku-4.5",
+      "name": "Anthropic: Claude Haiku 4.5",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1760547638,
+      "context_length": 200000,
+      "max_completion_tokens": 64000,
+      "pricing": {
+        "base": {
+          "input": 1,
+          "output": 5
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-opus-4.6",
+      "public_id": "claude-opus-4.6",
+      "name": "Anthropic: Claude Opus 4.6",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1770219050,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 5,
+          "output": 25
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-opus-4.7",
+      "public_id": "claude-opus-4.7",
+      "name": "Anthropic: Claude Opus 4.7",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1776351100,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 5,
+          "output": 25
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-opus-4.8",
+      "public_id": "claude-opus-4.8",
+      "name": "Anthropic: Claude Opus 4.8",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1779905091,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 5,
+          "output": 25
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-opus-5",
+      "public_id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1784912544,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 5,
+          "output": 25
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "anthropic/claude-sonnet-5",
+      "public_id": "claude-sonnet-5",
+      "name": "Anthropic: Claude Sonnet 5",
+      "provider": "Anthropic",
+      "owned_by": "anthropic",
+      "created": 1782843083,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 10
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "deepseek/deepseek-v4-flash",
+      "public_id": "deepseek-v4-flash",
+      "name": "DeepSeek: DeepSeek V4 Flash 0423",
+      "provider": "DeepInfra",
+      "owned_by": "deepseek",
+      "created": 1777000666,
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 0.09,
+          "output": 0.18
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "deepseek/deepseek-v4-flash-vision-exp",
+      "public_id": "deepseek-v4-flash-vision-exp",
+      "name": "DeepSeek: DeepSeek V4 Flash Vision Exp",
+      "provider": "DeepSeek",
+      "owned_by": "deepseek",
+      "created": 1787311563,
+      "context_length": 1048576,
+      "max_completion_tokens": 384000,
+      "pricing": {
+        "base": {
+          "input": 0.22,
+          "output": 0.66
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "deepseek/deepseek-v4-pro",
+      "public_id": "deepseek-v4-pro",
+      "name": "DeepSeek: DeepSeek V4 Pro 0423",
+      "provider": "DeepInfra",
+      "owned_by": "deepseek",
+      "created": 1777000679,
+      "context_length": 1048576,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 1.3,
+          "output": 2.6
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "google/gemini-3.1-pro-preview",
+      "public_id": "gemini-3.1-pro-preview",
+      "name": "Google: Gemini 3.1 Pro Preview",
+      "provider": "Google-AI-Studio",
+      "owned_by": "google",
+      "created": 1771509627,
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 12
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "google/gemini-3.7-flash",
+      "public_id": "gemini-3.7-flash",
+      "name": "Google: Gemini 3.7 Flash",
+      "provider": "Google-AI-Studio",
+      "owned_by": "google",
+      "created": 1786640581,
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 0.75,
+          "output": 3.75
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "google/gemma-4-26b-a4b-it",
+      "public_id": "gemma-4-26b-a4b-it",
+      "name": "Google: Gemma 4 26B A4B ",
+      "provider": "DeepInfra",
+      "owned_by": "google",
+      "created": 1775227989,
+      "context_length": 262144,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.07,
+          "output": 0.34
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "google/gemma-4-31b-it",
+      "public_id": "gemma-4-31b-it",
+      "name": "Google: Gemma 4 31B",
+      "provider": "DeepInfra",
+      "owned_by": "google",
+      "created": 1775148486,
+      "context_length": 262144,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.09,
+          "output": 0.34
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "inclusionai/ling-3.0-flash",
+      "public_id": "ling-3.0-flash",
+      "name": "Ling-3.0-flash",
+      "provider": "Novita",
+      "owned_by": "inclusionai",
+      "created": 1784818580,
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "pricing": {
+        "base": {
+          "input": 0.021,
+          "output": 0.063
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "kwaipilot/kat-coder-pro-v2",
+      "public_id": "kat-coder-pro-v2",
+      "name": "Kwaipilot: KAT-Coder-Pro V2",
+      "provider": "AtlasCloud",
+      "owned_by": "kwaipilot",
+      "created": 1774649310,
+      "context_length": 262144,
+      "max_completion_tokens": 144000,
+      "pricing": {
+        "base": {
+          "input": 0.3,
+          "output": 1.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "meituan/longcat-2.0",
+      "public_id": "longcat-2.0",
+      "name": "Meituan: LongCat 2.0",
+      "provider": "AtlasCloud",
+      "owned_by": "meituan",
+      "created": 1784554658,
+      "context_length": 1048756,
+      "max_completion_tokens": 262144,
+      "pricing": {
+        "base": {
+          "input": 0.3,
+          "output": 1.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "meta/muse-glimmer-30b",
+      "public_id": "muse-glimmer-30b",
+      "name": "Meta: Muse Glimmer 30B",
+      "provider": "DeepInfra",
+      "owned_by": "meta",
+      "created": 1786302394,
+      "context_length": 131072,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.3,
+          "output": 1.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "meta/muse-spark-1.1",
+      "public_id": "muse-spark-1.1",
+      "name": "Meta: Muse Spark 1.1",
+      "provider": "Meta",
+      "owned_by": "meta",
+      "created": 1784215741,
+      "context_length": 1048576,
+      "max_completion_tokens": 943718,
+      "pricing": {
+        "base": {
+          "input": 1.25,
+          "output": 4.25
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "meta/muse-spark-1.2",
+      "public_id": "muse-spark-1.2",
+      "name": "Meta: Muse Spark 1.2",
+      "provider": "Meta",
+      "owned_by": "meta",
+      "created": 1785959287,
+      "context_length": 1048576,
+      "max_completion_tokens": 943718,
+      "pricing": {
+        "base": {
+          "input": 1.25,
+          "output": 4.25
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "meta/muse-spark-1.2-contributor",
+      "public_id": "muse-spark-1.2-contributor",
+      "name": "Meta: Muse Spark 1.2 Contributor",
+      "provider": "Meta",
+      "owned_by": "meta",
+      "created": 1787336476,
+      "context_length": 1048576,
+      "max_completion_tokens": 943718,
+      "pricing": {
+        "base": {
+          "input": 0.1,
+          "output": 0.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "minimax/minimax-m2.7",
+      "public_id": "minimax-m2.7",
+      "name": "MiniMax: MiniMax M2.7",
+      "provider": "DeepInfra",
+      "owned_by": "minimax",
+      "created": 1773836697,
+      "context_length": 196608,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0.25,
+          "output": 1
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "minimax/minimax-m3",
+      "public_id": "minimax-m3",
+      "name": "MiniMax: MiniMax M3",
+      "provider": "DeepInfra",
+      "owned_by": "minimax",
+      "created": 1780245374,
+      "context_length": 524288,
+      "max_completion_tokens": 512000,
+      "pricing": {
+        "base": {
+          "input": 0.28,
+          "output": 1.1
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "mistralai/mistral-medium-3-5",
+      "public_id": "mistral-medium-3-5",
+      "name": "Mistral: Mistral Medium 3.5",
+      "provider": "Mistral",
+      "owned_by": "mistralai",
+      "created": 1777570439,
+      "context_length": 262144,
+      "max_completion_tokens": 209715,
+      "pricing": {
+        "base": {
+          "input": 1.5,
+          "output": 7.5
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "mistralai/mistral-small-2603",
+      "public_id": "mistral-small-2603",
+      "name": "Mistral: Mistral Small 4",
+      "provider": "Mistral",
+      "owned_by": "mistralai",
+      "created": 1773695685,
+      "context_length": 262144,
+      "max_completion_tokens": 209715,
+      "pricing": {
+        "base": {
+          "input": 0.15,
+          "output": 0.6
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "moonshotai/kimi-k3",
+      "public_id": "kimi-k3",
+      "name": "MoonshotAI: Kimi K3",
+      "provider": "Makora",
+      "owned_by": "moonshotai",
+      "created": 1784215858,
+      "context_length": 1048576,
+      "max_completion_tokens": 943718,
+      "pricing": {
+        "base": {
+          "input": 2.55,
+          "output": 12.75
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "nex-agi/nex-n2-pro",
+      "public_id": "nex-n2-pro",
+      "name": "Nex AGI: Nex-N2-Pro",
+      "provider": "SiliconFlow",
+      "owned_by": "nex-agi",
+      "created": 1780937140,
+      "context_length": 262144,
+      "max_completion_tokens": 256000,
+      "pricing": {
+        "base": {
+          "input": 0.5,
+          "output": 2.5
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "nvidia/nemotron-3-super-120b-a12b",
+      "public_id": "nemotron-3-super-120b-a12b",
+      "name": "NVIDIA: Nemotron 3 Super",
+      "provider": "DeepInfra",
+      "owned_by": "nvidia",
+      "created": 1773245239,
+      "context_length": 262144,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.085,
+          "output": 0.4
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "public_id": "nemotron-3-ultra-550b-a55b",
+      "name": "NVIDIA: Nemotron 3 Ultra",
+      "provider": "DeepInfra",
+      "owned_by": "nvidia",
+      "created": 1780551208,
+      "context_length": 262144,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.5,
+          "output": 2.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "nvidia/nemotron-3.5-lightning",
+      "public_id": "nemotron-3.5-lightning",
+      "name": "NVIDIA: Nemotron 3.5 Lightning",
+      "provider": "DeepInfra",
+      "owned_by": "nvidia",
+      "created": 1786452751,
+      "context_length": 262144,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0.08,
+          "output": 0.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "openai/gpt-5.5",
+      "public_id": "gpt-5.5",
+      "name": "OpenAI: GPT-5.5",
+      "provider": "OpenAI",
+      "owned_by": "openai",
+      "created": 1777051893,
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 2.5,
+          "output": 15
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "openai/gpt-5.5-pro",
+      "public_id": "gpt-5.5-pro",
+      "name": "OpenAI: GPT-5.5 Pro",
+      "provider": "OpenAI",
+      "owned_by": "openai",
+      "created": 1777051896,
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 15,
+          "output": 90
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "openai/gpt-5.6-luna",
+      "public_id": "gpt-5.6-luna",
+      "name": "OpenAI: GPT-5.6 Luna",
+      "provider": "OpenAI",
+      "owned_by": "openai",
+      "created": 1783590864,
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 0.2,
+          "output": 1.2
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "openai/gpt-5.6-sol",
+      "public_id": "gpt-5.6-sol",
+      "name": "OpenAI: GPT-5.6 Sol",
+      "provider": "OpenAI",
+      "owned_by": "openai",
+      "created": 1783590850,
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 10
+        },
+        "promotion": {
+          "discount_percent": 90,
+          "starts_at": "2026-08-26T00:00:00.000Z",
+          "ends_at": "2026-11-22T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "openai/gpt-5.6-terra",
+      "public_id": "gpt-5.6-terra",
+      "name": "OpenAI: GPT-5.6 Terra",
+      "provider": "OpenAI",
+      "owned_by": "openai",
+      "created": 1783590857,
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 12
+        },
+        "promotion": {
+          "discount_percent": 85,
+          "starts_at": "2026-06-29T00:00:00.000Z",
+          "ends_at": "2026-09-16T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "canonical_id": "poolside/laguna-s-2.1",
+      "public_id": "laguna-s-2.1",
+      "name": "Poolside: Laguna S 2.1",
+      "provider": "Poolside",
+      "owned_by": "poolside",
+      "created": 1784652683,
+      "context_length": 1048576,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0.09,
+          "output": 0.18
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "poolside/laguna-xs-2.1",
+      "public_id": "laguna-xs-2.1",
+      "name": "Poolside: Laguna XS 2.1",
+      "provider": "Poolside",
+      "owned_by": "poolside",
+      "created": 1783002429,
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "pricing": {
+        "base": {
+          "input": 0.06,
+          "output": 0.12
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "qwen/qwen3.6-27b",
+      "public_id": "qwen3.6-27b",
+      "name": "Qwen: Qwen3.6 27B",
+      "provider": "Chutes",
+      "owned_by": "qwen",
+      "created": 1777255064,
+      "context_length": 262144,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 0.3,
+          "output": 2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "qwen/qwen3.6-35b-a3b",
+      "public_id": "qwen3.6-35b-a3b",
+      "name": "Qwen: Qwen3.6 35B A3B",
+      "provider": "DeepInfra",
+      "owned_by": "qwen",
+      "created": 1777260255,
+      "context_length": 262144,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.1,
+          "output": 0.95
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "qwen/qwen3.8-2.4t-a95b",
+      "public_id": "qwen3.8-2.4t-a95b",
+      "name": "Qwen: Qwen3.8 2.4T A95B",
+      "provider": "DeepInfra",
+      "owned_by": "qwen",
+      "created": 1786551702,
+      "context_length": 262144,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 6
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "qwen/qwen3.8-27b",
+      "public_id": "qwen3.8-27b",
+      "name": "Qwen: Qwen3.8 27B",
+      "provider": "Chutes",
+      "owned_by": "qwen",
+      "created": 1786722910,
+      "context_length": 262144,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 0.35,
+          "output": 2.75
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "sakana/fugu-ultra",
+      "public_id": "fugu-ultra",
+      "name": "Sakana: Fugu Ultra",
+      "provider": "Sakana-AI",
+      "owned_by": "sakana",
+      "created": 1782276303,
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "pricing": {
+        "base": {
+          "input": 5,
+          "output": 30
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "sakana/sakana-namazu",
+      "public_id": "sakana-namazu",
+      "name": "Sakana: Sakana Namazu",
+      "provider": "Sakana-AI",
+      "owned_by": "sakana",
+      "created": 1786410129,
+      "context_length": 262144,
+      "max_completion_tokens": 65536,
+      "pricing": {
+        "base": {
+          "input": 0.95,
+          "output": 4
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "stealth/ox-alpha",
+      "public_id": "ox-alpha",
+      "name": "Ox Alpha",
+      "provider": "Stealth",
+      "owned_by": "stealth",
+      "created": 1787256295,
+      "context_length": 1048576,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0,
+          "output": 0
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "stepfun/step-3.7-flash",
+      "public_id": "step-3.7-flash",
+      "name": "StepFun: Step 3.7 Flash",
+      "provider": "DeepInfra",
+      "owned_by": "stepfun",
+      "created": 1779985069,
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "pricing": {
+        "base": {
+          "input": 0.2,
+          "output": 1.15
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "thinkingmachines/inkling",
+      "public_id": "inkling",
+      "name": "Thinking Machines: Inkling",
+      "provider": "DeepInfra",
+      "owned_by": "thinkingmachines",
+      "created": 1784325956,
+      "context_length": 524288,
+      "max_completion_tokens": 262144,
+      "pricing": {
+        "base": {
+          "input": 0.95,
+          "output": 4.05
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "thinkingmachines/inkling-small",
+      "public_id": "inkling-small",
+      "name": "Thinking Machines: Inkling Small",
+      "provider": "DeepInfra",
+      "owned_by": "thinkingmachines",
+      "created": 1785443117,
+      "context_length": 524288,
+      "max_completion_tokens": 262144,
+      "pricing": {
+        "base": {
+          "input": 0.45,
+          "output": 1.2
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "x-ai/grok-4.5",
+      "public_id": "grok-4.5",
+      "name": "SpaceXAI: Grok 4.5",
+      "provider": "xAI",
+      "owned_by": "x-ai",
+      "created": 1783523154,
+      "context_length": 500000,
+      "max_completion_tokens": 450000,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 6
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "x-ai/grok-4.6",
+      "public_id": "grok-4.6",
+      "name": "SpaceXAI: Grok 4.6",
+      "provider": "xAI",
+      "owned_by": "x-ai",
+      "created": 1786548957,
+      "context_length": 500000,
+      "max_completion_tokens": 450000,
+      "pricing": {
+        "base": {
+          "input": 2,
+          "output": 6
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "xiaomi/mimo-v2.5",
+      "public_id": "mimo-v2.5",
+      "name": "Xiaomi: MiMo-V2.5",
+      "provider": "Xiaomi",
+      "owned_by": "xiaomi",
+      "created": 1776874269,
+      "context_length": 1048576,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0.14,
+          "output": 0.28
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "xiaomi/mimo-v2.5-pro",
+      "public_id": "mimo-v2.5-pro",
+      "name": "Xiaomi: MiMo-V2.5-Pro",
+      "provider": "DeepInfra",
+      "owned_by": "xiaomi",
+      "created": 1776874273,
+      "context_length": 1048576,
+      "max_completion_tokens": 16384,
+      "pricing": {
+        "base": {
+          "input": 0.39,
+          "output": 1.17
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "z-ai/glm-5.2",
+      "public_id": "glm-5.2",
+      "name": "Z.ai: GLM 5.2",
+      "provider": "Sail-Research",
+      "owned_by": "z-ai",
+      "created": 1781631930,
+      "context_length": 1048576,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 0.5,
+          "output": 3.15
+        },
+        "promotion": null
+      }
+    },
+    {
+      "canonical_id": "z-ai/glm-5.3",
+      "public_id": "glm-5.3",
+      "name": "Z.ai: GLM 5.3",
+      "provider": "Z.AI",
+      "owned_by": "z-ai",
+      "created": 1787086655,
+      "context_length": 1048576,
+      "max_completion_tokens": 131072,
+      "pricing": {
+        "base": {
+          "input": 1.4,
+          "output": 4.4
+        },
+        "promotion": null
+      }
+    }
+  ]
+}
