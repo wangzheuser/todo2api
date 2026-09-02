@@ -50,6 +50,38 @@ func TestResponsesRequestConvertsItemsAndTools(t *testing.T) {
 	}
 }
 
+func TestResponsesInstructionsNormalizeOutsideConversation(t *testing.T) {
+	req := responsesRequest{
+		Model:        "public-model",
+		Instructions: json.RawMessage(`"top-level instruction"`),
+		Input: json.RawMessage(`[
+			{"type":"message","role":"system","content":[{"type":"input_text","text":"system instruction"}]},
+			{"type":"message","role":"developer","content":[{"type":"input_text","text":"developer instruction"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"question"}]}
+		]`),
+		Tools: []responsesTool{{
+			Type: "function", Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+
+	chat, _, err := req.chatRequest("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat = openai.NormalizeInstructions(chat)
+
+	wantSystem := "top-level instruction\n\nsystem instruction\n\ndeveloper instruction"
+	if chat.System != wantSystem {
+		t.Fatalf("system = %q, want %q", chat.System, wantSystem)
+	}
+	if len(chat.Messages) != 1 || chat.Messages[0].Role != "user" || chat.Messages[0].Content != "question" {
+		t.Fatalf("messages = %#v", chat.Messages)
+	}
+	if len(chat.Tools) != 1 || chat.Tools[0].Function.Name != "lookup" {
+		t.Fatalf("tools = %#v", chat.Tools)
+	}
+}
+
 func TestResponsesRequestMergesAdditionalTools(t *testing.T) {
 	req := responsesRequest{
 		Model: "public-model",

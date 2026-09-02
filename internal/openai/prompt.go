@@ -5,6 +5,35 @@ import (
 	"strings"
 )
 
+// NormalizeInstructions promotes system and developer messages into the
+// request-level system prompt without mutating the caller's message slice.
+func NormalizeInstructions(req ChatRequest) ChatRequest {
+	system := make([]string, 0, 1)
+	developer := make([]string, 0, 1)
+	messages := make([]ChatMessage, 0, len(req.Messages))
+	if instruction := strings.TrimSpace(req.System); instruction != "" {
+		system = append(system, instruction)
+	}
+	for _, message := range req.Messages {
+		instruction := strings.TrimSpace(message.Content)
+		switch message.Role {
+		case "system":
+			if instruction != "" {
+				system = append(system, instruction)
+			}
+		case "developer":
+			if instruction != "" {
+				developer = append(developer, instruction)
+			}
+		default:
+			messages = append(messages, message)
+		}
+	}
+	req.System = strings.Join(append(system, developer...), "\n\n")
+	req.Messages = messages
+	return req
+}
+
 // FlattenTurn renders the messages that must be sent to the upstream for the
 // current turn. tool-result messages are formatted so the agent can read them.
 func FlattenTurn(msgs []ChatMessage) string {

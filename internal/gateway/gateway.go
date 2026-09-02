@@ -167,6 +167,7 @@ func (g *Gateway) Stream(ctx context.Context, req openai.ChatRequest, emit func(
 }
 
 func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit func(StreamEvent) error) (*Reply, error) {
+	req = openai.NormalizeInstructions(req)
 	runnerModel := g.resolveModel(req.Model)
 	publicModel := g.publicModelID(req.Model, runnerModel)
 	var completedUsage TokenUsage

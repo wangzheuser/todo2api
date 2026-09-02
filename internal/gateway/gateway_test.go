@@ -83,9 +83,14 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	}}
 
 	firstReq := openai.ChatRequest{
-		Model:    "public-model",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "Read a.txt"}},
-		Tools:    tools,
+		Model:  "public-model",
+		System: "top-level instruction",
+		Messages: []openai.ChatMessage{
+			{Role: "system", Content: "system instruction"},
+			{Role: "developer", Content: "developer instruction"},
+			{Role: "user", Content: "Read a.txt"},
+		},
+		Tools: tools,
 	}
 	first, err := gw.Complete(context.Background(), firstReq)
 	if err != nil {
@@ -107,8 +112,11 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	}
 
 	secondReq := openai.ChatRequest{
-		Model: "public-model",
+		Model:  "public-model",
+		System: "top-level instruction",
 		Messages: []openai.ChatMessage{
+			{Role: "system", Content: "system instruction"},
+			{Role: "developer", Content: "developer instruction"},
 			{Role: "user", Content: "Read a.txt"},
 			{Role: "assistant", Content: first.Content, ToolCalls: first.ToolCalls},
 			{Role: "tool", ToolCallID: first.ToolCalls[0].ID, Content: "hello from file"},
@@ -144,6 +152,9 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	if mock.createCount != 1 || len(mock.addBodies) != 2 {
 		t.Fatalf("create count = %d, add count = %d", mock.createCount, len(mock.addBodies))
 	}
+	if got := mock.createBody["content"]; got != "Read a.txt" {
+		t.Fatalf("create content = %#v", got)
+	}
 	if got := mock.addBodies[0]["content"]; got != "[tool result for read_file]\nhello from file" {
 		t.Fatalf("tool follow-up content = %#v", got)
 	}
@@ -156,6 +167,10 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	}
 	if agent["systemMessageMode"] != "raw" {
 		t.Fatalf("agent settings = %#v", agent)
+	}
+	wantSystem := "top-level instruction\n\nsystem instruction\n\ndeveloper instruction\n\n" + openai.BuildToolSystemPrompt(tools)
+	if agent["systemMessage"] != wantSystem {
+		t.Fatalf("system message = %#v, want %#v", agent["systemMessage"], wantSystem)
 	}
 	permissions := agent["permissions"].(map[string]any)
 	if deny := permissions["deny"].([]any); len(deny) != 2 || deny[0] != "device:*" || deny[1] != "cloud:*" {
