@@ -52,6 +52,19 @@ def prompt_int(label: str, current: int, *, minimum: int = 1) -> int:
         print(f"请输入不小于 {minimum} 的整数")
 
 
+def prompt_bool(label: str, current: bool) -> bool:
+    default = "Y" if current else "N"
+    while True:
+        value = input(f"{label} (Y/N) [{default}]: ").strip().lower()
+        if not value:
+            return current
+        if value in {"y", "yes", "1", "true"}:
+            return True
+        if value in {"n", "no", "0", "false"}:
+            return False
+        print("请输入 Y 或 N")
+
+
 def load_working_channels(path: Path | None = None) -> list[dict]:
     path = path or WORKING_CHANNELS_FILE
     try:
@@ -94,7 +107,7 @@ def prompt_mail_provider(current: str) -> str:
 
 
 def build_command(settings: dict) -> list[str]:
-    return [
+    command = [
         sys.executable,
         str(SCRIPT_DIR / "main.py"),
         "--mail-provider", "mailpoolhub",
@@ -111,6 +124,15 @@ def build_command(settings: dict) -> list[str]:
         "--count", str(settings["count"]),
         "--threads", str(settings["threads"]),
     ]
+    if settings.get("cloud_sync_enabled", False):
+        command.extend(
+            [
+                "--cloud-sync",
+                "--cloud-sync-url", str(settings["cloud_sync_base_url"]),
+                "--cloud-sync-username", str(settings["cloud_sync_admin_username"]),
+            ]
+        )
+    return command
 
 
 def relay_output(stream, path: Path = LOG_FILE, max_bytes: int = MAX_LOG_BYTES) -> None:
@@ -207,6 +229,10 @@ def main() -> int:
         "mailpoolhub_api_key": os.environ.get("MAILPOOLHUB_API_KEY", ""),
         "proxy_url": os.environ.get("TODO_PROXY_URL", ""),
         "proxy_platforms": "node,jp,us,de,github,baokemeng",
+        "cloud_sync_enabled": False,
+        "cloud_sync_base_url": "",
+        "cloud_sync_admin_username": "",
+        "cloud_sync_admin_password": "",
     }
     settings = {**defaults, **saved}
 
@@ -257,12 +283,36 @@ def main() -> int:
     settings["mailpoolhub_api_key"] = prompt_text(
         "MailPoolHub API Key", str(settings["mailpoolhub_api_key"])
     )
+    settings["cloud_sync_enabled"] = prompt_bool(
+        "注册成功后同步到云端账号池",
+        bool(settings["cloud_sync_enabled"]),
+    )
+    if settings["cloud_sync_enabled"]:
+        settings["cloud_sync_base_url"] = prompt_text(
+            "云端项目访问地址", str(settings["cloud_sync_base_url"])
+        )
+        settings["cloud_sync_admin_username"] = prompt_text(
+            "云端管理员账号", str(settings["cloud_sync_admin_username"])
+        )
+        settings["cloud_sync_admin_password"] = prompt_text(
+            "云端管理员密码", str(settings["cloud_sync_admin_password"])
+        )
 
     if not settings["mailpoolhub_api_key"]:
         print("MailPoolHub API Key 不能为空")
         return 2
     if not settings["proxy_url"]:
         print("Resin 代理 URL 不能为空")
+        return 2
+    if settings["cloud_sync_enabled"] and not all(
+        str(settings[key]).strip()
+        for key in (
+            "cloud_sync_base_url",
+            "cloud_sync_admin_username",
+            "cloud_sync_admin_password",
+        )
+    ):
+        print("启用云端同步时，项目地址、管理员账号和密码不能为空")
         return 2
     settings["threads"] = min(settings["threads"], settings["count"])
     settings["turnstile_concurrency"] = min(
@@ -272,9 +322,14 @@ def main() -> int:
 
     environment = os.environ.copy()
     environment["MAILPOOLHUB_API_KEY"] = settings["mailpoolhub_api_key"]
+    if settings["cloud_sync_enabled"]:
+        environment["TODO2API_CLOUD_ADMIN_PASSWORD"] = settings[
+            "cloud_sync_admin_password"
+        ]
     print(
         f"\n启动注册：总数={settings['count']}，并发={settings['threads']}，"
         f"浏览器并发={settings['turnstile_concurrency']}，渠道={settings['mailpoolhub_provider']}\n"
+        f"云端同步={'已启用' if settings['cloud_sync_enabled'] else '未启用'}\n"
         f"日志文件：{LOG_FILE}（单文件最大 16 MiB）\n"
     )
     return run_registration(build_command(settings), environment)

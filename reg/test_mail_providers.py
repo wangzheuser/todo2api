@@ -146,6 +146,71 @@ class MailPoolHubContractHandler(BaseHTTPRequestHandler):
         )
 
 
+class CloudSyncContractHandler(BaseHTTPRequestHandler):
+    """实现 todo2api 管理登录和账号批量导入最小契约。"""
+
+    keys: list[str] = []
+    origins: list[str] = []
+    login_count = 0
+    bulk_count = 0
+    expire_once = False
+    fail_bulk = False
+    failed_keys: set[str] = set()
+
+    def log_message(self, _format: str, *_args) -> None:
+        pass
+
+    def _json(self, status: int, payload: dict, *, cookie: str = "") -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        type(self).origins.append(self.headers.get("Origin", ""))
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/auth/login":
+            type(self).login_count += 1
+            if body != {"username": "admin", "password": "secret"}:
+                self._json(401, {"error": "invalid credentials"})
+                return
+            self._json(
+                200,
+                {"authenticated": True},
+                cookie="todo2api-admin=test-session; Path=/; HttpOnly",
+            )
+            return
+        if self.path != "/api/accounts/bulk":
+            self._json(404, {"error": "not found"})
+            return
+        type(self).bulk_count += 1
+        if type(self).expire_once:
+            type(self).expire_once = False
+            self._json(401, {"error": "authentication required"})
+            return
+        if "todo2api-admin=test-session" not in self.headers.get("Cookie", ""):
+            self._json(401, {"error": "authentication required"})
+            return
+        if type(self).fail_bulk:
+            self._json(503, {"error": "temporarily unavailable"})
+            return
+        results = []
+        for key in body.get("keys", []):
+            if key in type(self).failed_keys:
+                results.append({"status": "failed", "error": "fixture failure"})
+            elif key in type(self).keys:
+                results.append({"status": "duplicate"})
+            else:
+                type(self).keys.append(key)
+                results.append({"status": "created", "api_key_masked": "fixture..."})
+        self._json(200, {"results": results})
+
+
 class MailPoolHubProviderTest(unittest.TestCase):
     """通过真实本地 TCP/HTTP 验证 MailPoolHub Provider 契约。"""
 
@@ -254,6 +319,163 @@ class MailPoolHubProviderTest(unittest.TestCase):
             account = provider.create_account(exclude_domains=["blocked.test"])
         self.assertEqual("second@allowed.test", account["address"])
         self.assertEqual(["/mailboxes/blocked"], deleted)
+
+
+class CloudAccountSyncTest(unittest.TestCase):
+    """验证新 Key 到 todo2api 管理 API 的持久同步。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), CloudSyncContractHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        host, port = cls.server.server_address
+        cls.base_url = f"http://{host}:{port}"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=3)
+
+    def setUp(self) -> None:
+        CloudSyncContractHandler.keys = []
+        CloudSyncContractHandler.origins = []
+        CloudSyncContractHandler.login_count = 0
+        CloudSyncContractHandler.bulk_count = 0
+        CloudSyncContractHandler.expire_once = False
+        CloudSyncContractHandler.fail_bulk = False
+        CloudSyncContractHandler.failed_keys = set()
+
+    def new_sync(self, directory: str) -> main.CloudAccountSync:
+        return main.CloudAccountSync(
+            self.base_url,
+            "admin",
+            "secret",
+            queue_dir=Path(directory),
+            timeout=3,
+        )
+
+    def test_save_result_immediately_adds_key_and_clears_queue(self) -> None:
+        key = "cloud-sync-fixture-key-value"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            sync = self.new_sync(directory)
+            with patch.object(main, "OUTPUT_FILE", output):
+                main.save_result(
+                    {"thread_id": 1, "api_keys": [{"key": key}], "default_key": None},
+                    sync,
+                )
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            self.assertEqual(0, sync.pending_count())
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertTrue(all(origin == self.base_url for origin in CloudSyncContractHandler.origins))
+            sync.enqueue([key])
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            sync.close()
+
+    def test_expired_admin_session_logs_in_again(self) -> None:
+        CloudSyncContractHandler.expire_once = True
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue(["reauth-fixture-key"])
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual(2, CloudSyncContractHandler.login_count)
+            sync.close()
+
+    def test_queue_write_failure_does_not_lose_local_key(self) -> None:
+        key = "queue-write-recovery-key"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            sync = self.new_sync(directory)
+            original_write = sync._write_pending
+            calls = 0
+
+            def flaky_write(keys: list[str]) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise OSError("fixture disk error")
+                original_write(keys)
+
+            with patch.object(sync, "_write_pending", side_effect=flaky_write), patch.object(
+                main, "OUTPUT_FILE", output
+            ):
+                main.save_result(
+                    {"thread_id": 1, "api_keys": [{"key": key}], "default_key": None},
+                    sync,
+                )
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            self.assertEqual(0, sync.pending_count())
+            sync.close()
+
+    def test_failed_sync_survives_restart_and_restores_local_key(self) -> None:
+        key = "persistent-cloud-queue-key"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            CloudSyncContractHandler.fail_bulk = True
+            sync = self.new_sync(directory)
+            sync.enqueue([key, key])
+            with patch.object(main, "log") as cloud_log:
+                self.assertEqual(1, sync.flush_pending())
+            self.assertNotIn(key, " ".join(str(call) for call in cloud_log.call_args_list))
+            sync.close()
+
+            CloudSyncContractHandler.fail_bulk = False
+            resumed = self.new_sync(directory)
+            self.assertEqual(1, resumed.reconcile_output(output))
+            self.assertEqual(0, resumed.flush_pending())
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            resumed.close()
+
+    def test_partial_failure_only_keeps_failed_key_pending(self) -> None:
+        good = "partial-good-key"
+        bad = "partial-failed-key"
+        CloudSyncContractHandler.failed_keys = {bad}
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue([good, bad])
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual([good], CloudSyncContractHandler.keys)
+            CloudSyncContractHandler.failed_keys.clear()
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual([good, bad], CloudSyncContractHandler.keys)
+            sync.close()
+
+    def test_rejected_credentials_are_not_retried_in_same_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sync = main.CloudAccountSync(
+                self.base_url,
+                "admin",
+                "wrong-password",
+                queue_dir=Path(directory),
+            )
+            sync.enqueue(["auth-failure-key"])
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual(1, CloudSyncContractHandler.login_count)
+            sync.close()
+
+    def test_public_http_and_cross_target_queue_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            main.CloudAccountSync("http://example.com", "admin", "secret")
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue(["target-a-key"])
+            other = main.CloudAccountSync(
+                f"{self.base_url}/other",
+                "admin",
+                "secret",
+                queue_dir=Path(directory),
+            )
+            self.assertNotEqual(sync.queue_file, other.queue_file)
+            self.assertEqual(1, sync.pending_count())
+            self.assertEqual(0, other.pending_count())
+            sync.close()
+            other.close()
 
 
 class VerificationCodeTest(unittest.TestCase):
@@ -762,6 +984,50 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual("3600", command[command.index("--otp-cooldown") + 1])
         self.assertEqual("60", command[command.index("--network-cooldown") + 1])
         self.assertEqual("node,jp,us", command[command.index("--proxy-platforms") + 1])
+        self.assertNotIn("--cloud-sync", command)
+
+    def test_launcher_passes_cloud_password_only_through_environment(self) -> None:
+        """验证云端密码不会出现在子进程命令行。"""
+        saved = {
+            "count": 1,
+            "threads": 1,
+            "max_retries": 1,
+            "turnstile_concurrency": 1,
+            "turnstile_mode": "always",
+            "otp_interval_seconds": 40,
+            "otp_cooldown_seconds": 3600,
+            "network_cooldown_seconds": 60,
+            "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
+            "mailpoolhub_provider": "random",
+            "mailpoolhub_api_key": "fixture-mail-key",
+            "proxy_url": "http://node.{uuid}:fixture-token@127.0.0.1:9200",
+            "proxy_platforms": "node,jp",
+            "cloud_sync_enabled": True,
+            "cloud_sync_base_url": "https://cloud.example.test",
+            "cloud_sync_admin_username": "admin",
+            "cloud_sync_admin_password": "cloud-secret",
+        }
+        with patch.object(start_reg, "load_settings", return_value=saved), patch.object(
+            start_reg, "prompt_int", side_effect=lambda _label, current, **_kwargs: current
+        ), patch.object(
+            start_reg, "prompt_text", side_effect=lambda _label, current: current
+        ), patch.object(
+            start_reg, "prompt_bool", side_effect=lambda _label, current: current
+        ), patch.object(
+            start_reg, "prompt_mail_provider", side_effect=lambda current: current
+        ), patch.object(start_reg, "save_settings"), patch.object(
+            start_reg, "run_registration", return_value=0
+        ) as run:
+            self.assertEqual(0, start_reg.main())
+
+        command, environment = run.call_args.args
+        self.assertIn("--cloud-sync", command)
+        self.assertEqual(
+            "https://cloud.example.test",
+            command[command.index("--cloud-sync-url") + 1],
+        )
+        self.assertNotIn("cloud-secret", command)
+        self.assertEqual("cloud-secret", environment["TODO2API_CLOUD_ADMIN_PASSWORD"])
 
     def test_interactive_launcher_remembers_settings(self) -> None:
         """验证启动器配置可原子保存并在下次启动复用。"""

@@ -3,4 +3,5 @@ __pycache__/
 config.json
 get_apikey.txt
 start_reg.log*
+cloud_sync_pending.*.json
 

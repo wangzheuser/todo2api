@@ -1,0 +1,48 @@
+CHANGED_BRANCH: dev
+CHANGED_FIELD: optional immediate cloud account-pool sync after local API-key persistence, with admin-session authentication and a durable per-target retry queue
+
+ARTIFACTS:
+MODIFIED_FILE: D:/projects/github/todo2api/work/cloud-account-sync/MODIFIED_FILE
+DIFF_FILE: D:/projects/github/todo2api/work/cloud-account-sync/DIFF_FILE
+VERIFICATION.txt: D:/projects/github/todo2api/work/cloud-account-sync/VERIFICATION.txt
+ROLLBACK.sh: D:/projects/github/todo2api/work/cloud-account-sync/ROLLBACK.sh
+
+ORIGINAL_SHA256: 442561f3a5820520cbf6d67a7a68a3dfeb251bab34186d417c7576d0266c9414
+MODIFIED_SHA256: 5ceb95506b0103958995d2c65a2c460b8a00292845c4a4533bee5baea57b3159
+
+BASELINE:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: dev b6dc17f859280c5ba9e674965e6222cc3e882814 before cloud-sync changes
+LITERAL_OUTPUT_RESULT: BASELINE_COMPILE_EXIT=0 / BASELINE_TEST_EXIT=0 / Ran 45 tests / OK
+EXIT_STATUS: 0
+
+MODIFIED:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: current reg/main.py, reg/mail_providers.py, reg/start_reg.py, reg/test_mail_providers.py
+LITERAL_OUTPUT_RESULT: PYTHON_TESTS=53 EXIT=0 / OK
+EXIT_STATUS: 0
+
+LOCAL_HTTP_CONTRACT:
+COMMAND: python -m unittest test_mail_providers.CloudAccountSyncTest
+INPUT: local ThreadingHTTPServer implementing /api/auth/login and /api/accounts/bulk
+LITERAL_OUTPUT_RESULT: Ran 7 tests in 1.512s / OK / CLOUD_CONTRACT_EXIT=0
+EXIT_STATUS: 0
+
+GO_ADMIN_CONTRACT:
+COMMAND: go test ./internal/admin
+INPUT: current repository admin service tests
+LITERAL_OUTPUT_RESULT: ok todo2api/internal/admin (cached)
+EXIT_STATUS: 0
+
+FULL_GO_SUITE:
+COMMAND: go test ./...
+INPUT: current repository on Windows without generated web/dist
+LITERAL_OUTPUT_RESULT: cmd/todo2api and web setup failed because web/embed.go found no dist; internal/storage TestOpenPreservesExistingParentModeAndSecuresSQLiteFiles failed because Windows reported parent mode -rwxrwxrwx; all other reported packages passed
+EXIT_STATUS: 1
+
+ROLLBACK:
+COMMAND: C:/Program Files/Git/bin/bash.exe -lc "ROLLBACK.sh ROLLBACK_TEST_FILE"
+INPUT: ROLLBACK_TEST_FILE copied from MODIFIED_FILE, SHA256 5ceb95506b0103958995d2c65a2c460b8a00292845c4a4533bee5baea57b3159
+LITERAL_OUTPUT_RESULT: 442561f3a5820520cbf6d67a7a68a3dfeb251bab34186d417c7576d0266c9414 *ROLLBACK_TEST_FILE / ROLLBACK_EXIT=0
+EXIT_STATUS: 0
+RESTORED_BEHAVIOR_STATUS: rollback test copy matches the original main.py hash; MODIFIED_FILE remains changed with SHA256 5ceb95506b0103958995d2c65a2c460b8a00292845c4a4533bee5baea57b3159.
