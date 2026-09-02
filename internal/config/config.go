@@ -41,8 +41,9 @@ type ServerConfig struct {
 }
 
 type UpstreamConfig struct {
-	BaseURL     string        `yaml:"base_url"`
-	PollTimeout time.Duration `yaml:"poll_timeout"`
+	BaseURL              string        `yaml:"base_url"`
+	PollTimeout          time.Duration `yaml:"poll_timeout"`
+	FirstResponseTimeout time.Duration `yaml:"first_response_timeout"`
 }
 
 type PoolConfig struct {
@@ -202,6 +203,9 @@ func (c *Config) setDefaults() {
 	if c.Upstream.PollTimeout == 0 {
 		c.Upstream.PollTimeout = defaultPollTimeout
 	}
+	if c.Upstream.FirstResponseTimeout == 0 {
+		c.Upstream.FirstResponseTimeout = c.Upstream.PollTimeout
+	}
 	if c.Pool.Strategy == "" {
 		c.Pool.Strategy = "round_robin"
 	}
@@ -230,6 +234,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Upstream.PollTimeout <= 0 {
 		return fmt.Errorf("upstream.poll_timeout must be positive")
+	}
+	if c.Upstream.FirstResponseTimeout <= 0 {
+		return fmt.Errorf("upstream.first_response_timeout must be positive")
+	}
+	if c.Upstream.FirstResponseTimeout > c.Upstream.PollTimeout {
+		return fmt.Errorf("upstream.first_response_timeout must not exceed upstream.poll_timeout")
 	}
 	if c.Pool.Strategy != "round_robin" && c.Pool.Strategy != "least_busy" {
 		return fmt.Errorf("pool.strategy must be round_robin or least_busy")

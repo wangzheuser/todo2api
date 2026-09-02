@@ -40,6 +40,9 @@ models:
 	if cfg.Upstream.PollTimeout != 45*time.Second {
 		t.Fatalf("poll timeout = %s", cfg.Upstream.PollTimeout)
 	}
+	if cfg.Upstream.FirstResponseTimeout != cfg.Upstream.PollTimeout {
+		t.Fatalf("first response timeout = %s", cfg.Upstream.FirstResponseTimeout)
+	}
 	if cfg.Pool.Keys[0].APIKey != "upstream-secret" {
 		t.Fatalf("API key was not expanded: %q", cfg.Pool.Keys[0].APIKey)
 	}
@@ -48,6 +51,38 @@ models:
 	}
 	if !reflect.DeepEqual(cfg.ToolProtocol.DenyUpstreamTools, []string{"device:*", "cloud:*"}) {
 		t.Fatalf("deny defaults = %#v", cfg.ToolProtocol.DenyUpstreamTools)
+	}
+}
+
+func TestFirstResponseTimeoutValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		valid   bool
+	}{
+		{name: "explicit", timeout: 15 * time.Second, valid: true},
+		{name: "zero defaults to poll timeout", valid: true},
+		{name: "negative", timeout: -time.Second},
+		{name: "exceeds poll timeout", timeout: 46 * time.Second},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Config{
+				Upstream: UpstreamConfig{PollTimeout: 45 * time.Second, FirstResponseTimeout: test.timeout},
+				Storage:  StorageConfig{MasterKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="},
+				Web:      WebConfig{AdminUsername: "admin", AdminPassword: "test"},
+				Models:   ModelsConfig{Default: "openai:vendor/upstream-model"},
+			}
+			cfg.setDefaults()
+			err := cfg.Validate()
+			if (err == nil) != test.valid {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if test.timeout == 0 && cfg.Upstream.FirstResponseTimeout != cfg.Upstream.PollTimeout {
+				t.Fatalf("first response timeout = %s", cfg.Upstream.FirstResponseTimeout)
+			}
+		})
 	}
 }
 

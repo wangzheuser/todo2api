@@ -22,6 +22,8 @@ web:
 upstream:
   base_url: "https://api.todofor.ai/api/v1"
   poll_timeout: 5m
+  # Defaults to poll_timeout; set lower only when multiple accounts should fail over sooner.
+  first_response_timeout: 5m
 
 pool:
   strategy: "round_robin" # round_robin or least_busy

@@ -498,6 +498,10 @@ func (g *Gateway) applyAccountFailure(
 		log.Printf("upstream account %d permanently removed: %v", index, cause)
 		return nil
 	}
+	if errors.Is(cause, ErrFirstResponseTimeout) && g.pool.Len() == 1 {
+		log.Printf("upstream account %d kept available after first-response timeout: only account in pool", index)
+		return nil
+	}
 	var upstreamErr *upstream.HTTPError
 	if errors.As(cause, &upstreamErr) && (upstreamErr.StatusCode == http.StatusUnauthorized || upstreamErr.StatusCode == http.StatusForbidden) {
 		g.pool.MarkInvalid(context.Background(), acc, cause)
@@ -867,14 +871,10 @@ func (g *Gateway) waitAssistant(
 }
 
 func (g *Gateway) firstResponseTimeout() time.Duration {
-	timeout := g.cfg.Upstream.PollTimeout / 6
-	if timeout > 30*time.Second {
-		timeout = 30 * time.Second
+	if g.cfg.Upstream.FirstResponseTimeout <= 0 {
+		return g.cfg.Upstream.PollTimeout
 	}
-	if timeout < 500*time.Millisecond {
-		timeout = 500 * time.Millisecond
-	}
-	return timeout
+	return g.cfg.Upstream.FirstResponseTimeout
 }
 
 func (g *Gateway) restPollInterval() time.Duration {

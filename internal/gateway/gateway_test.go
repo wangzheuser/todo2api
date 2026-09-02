@@ -211,6 +211,7 @@ type mockUpstream struct {
 	prematureFetch          bool
 	streamFragments         []string
 	streamDelay             time.Duration
+	firstResponseDelay      time.Duration
 	beforeReady             chan struct{}
 	createFailures          map[string]bool
 	createAttempts          map[string]int
@@ -372,6 +373,7 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		var content string
 		fragments := append([]string(nil), m.streamFragments...)
 		delay := m.streamDelay
+		firstResponseDelay := m.firstResponseDelay
 		beforeReady := m.beforeReady
 		dropWSEvents := m.dropWSEvents
 		silent := m.silentKeys[r.Header.Get("X-API-Key")]
@@ -404,6 +406,9 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 			return
 		}
 		go func() {
+			if firstResponseDelay > 0 {
+				time.Sleep(firstResponseDelay)
+			}
 			if len(fragments) > 0 {
 				for _, fragment := range fragments {
 					conn.WriteJSON(map[string]any{
@@ -506,7 +511,10 @@ func TestStreamFailsOverBeforeStartingClientStream(t *testing.T) {
 	mock.mu.Unlock()
 
 	cfg := &config.Config{
-		Upstream: config.UpstreamConfig{BaseURL: mock.server.URL + "/api/v1", PollTimeout: 3 * time.Second},
+		Upstream: config.UpstreamConfig{
+			BaseURL: mock.server.URL + "/api/v1", PollTimeout: 3 * time.Second,
+			FirstResponseTimeout: 500 * time.Millisecond,
+		},
 		Pool: config.PoolConfig{Strategy: "round_robin", Keys: []config.AccountKey{
 			{APIKey: "bad-key", ProjectID: "project-1"},
 			{APIKey: "good-key", ProjectID: "project-1"},
@@ -538,6 +546,62 @@ func TestStreamFailsOverBeforeStartingClientStream(t *testing.T) {
 	mock.mu.Unlock()
 	if badAttempts != 1 || goodAttempts != 1 {
 		t.Fatalf("create attempts: bad=%d good=%d", badAttempts, goodAttempts)
+	}
+}
+
+func TestCompleteWaitsPastLegacyFirstResponseTimeout(t *testing.T) {
+	mock := newMockUpstream(t)
+	mock.mu.Lock()
+	mock.streamFragments = []string{"slow reply"}
+	mock.firstResponseDelay = 600 * time.Millisecond
+	mock.mu.Unlock()
+
+	gw := newTestGateway(t, mock)
+	reply, err := gw.Complete(context.Background(), openai.ChatRequest{
+		Model: "public-model", Messages: []openai.ChatMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Content != "slow reply" {
+		t.Fatalf("reply = %#v", reply)
+	}
+}
+
+func TestFirstResponseTimeoutKeepsOnlyAccountAvailable(t *testing.T) {
+	mock := newMockUpstream(t)
+	gw := newTestGateway(t, mock)
+	account := gw.pool.Pick()
+	if account == nil {
+		t.Fatal("expected one available account")
+	}
+
+	if err := gw.applyAccountFailure(account, accountFailureCooldown, 10*time.Minute, ErrFirstResponseTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if got := gw.pool.Pick(); got != account {
+		t.Fatalf("only account was cooled down: got=%p want=%p", got, account)
+	}
+}
+
+func TestCompleteStopsAtPollTimeout(t *testing.T) {
+	mock := newMockUpstream(t)
+	mock.mu.Lock()
+	mock.silentKeys["upstream-key"] = true
+	mock.mu.Unlock()
+
+	gw := newTestGateway(t, mock)
+	gw.cfg.Upstream.PollTimeout = 200 * time.Millisecond
+	gw.cfg.Upstream.FirstResponseTimeout = 200 * time.Millisecond
+	started := time.Now()
+	_, err := gw.Complete(context.Background(), openai.ChatRequest{
+		Model: "public-model", Messages: []openai.ChatMessage{{Role: "user", Content: "hello"}},
+	})
+	if err == nil {
+		t.Fatal("expected poll timeout")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("request exceeded poll timeout: %s", elapsed)
 	}
 }
 
