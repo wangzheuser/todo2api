@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import main
+import start_reg
 from mail_providers import MailPoolHubProvider, MailProviderError, extract_verification_code
 
 
@@ -61,7 +65,7 @@ class MailPoolHubContractHandler(BaseHTTPRequestHandler):
         if self.path == "/api/v1/mailboxes/mailbox-1/messages?refresh=true":
             type(self).message_requests += 1
             if type(self).message_requests == 1:
-                self._write_json(200, {"mailboxId": "mailbox-1", "messages": []})
+                self._write_json(502, {"error": {"code": "UPSTREAM_EOF", "message": "upstream EOF"}})
                 return
             self._write_json(
                 200,
@@ -142,6 +146,71 @@ class MailPoolHubContractHandler(BaseHTTPRequestHandler):
         )
 
 
+class CloudSyncContractHandler(BaseHTTPRequestHandler):
+    """实现 todo2api 管理登录和账号批量导入最小契约。"""
+
+    keys: list[str] = []
+    origins: list[str] = []
+    login_count = 0
+    bulk_count = 0
+    expire_once = False
+    fail_bulk = False
+    failed_keys: set[str] = set()
+
+    def log_message(self, _format: str, *_args) -> None:
+        pass
+
+    def _json(self, status: int, payload: dict, *, cookie: str = "") -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        type(self).origins.append(self.headers.get("Origin", ""))
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/auth/login":
+            type(self).login_count += 1
+            if body != {"username": "admin", "password": "secret"}:
+                self._json(401, {"error": "invalid credentials"})
+                return
+            self._json(
+                200,
+                {"authenticated": True},
+                cookie="todo2api-admin=test-session; Path=/; HttpOnly",
+            )
+            return
+        if self.path != "/api/accounts/bulk":
+            self._json(404, {"error": "not found"})
+            return
+        type(self).bulk_count += 1
+        if type(self).expire_once:
+            type(self).expire_once = False
+            self._json(401, {"error": "authentication required"})
+            return
+        if "todo2api-admin=test-session" not in self.headers.get("Cookie", ""):
+            self._json(401, {"error": "authentication required"})
+            return
+        if type(self).fail_bulk:
+            self._json(503, {"error": "temporarily unavailable"})
+            return
+        results = []
+        for key in body.get("keys", []):
+            if key in type(self).failed_keys:
+                results.append({"status": "failed", "error": "fixture failure"})
+            elif key in type(self).keys:
+                results.append({"status": "duplicate"})
+            else:
+                type(self).keys.append(key)
+                results.append({"status": "created", "api_key_masked": "fixture..."})
+        self._json(200, {"results": results})
+
+
 class MailPoolHubProviderTest(unittest.TestCase):
     """通过真实本地 TCP/HTTP 验证 MailPoolHub Provider 契约。"""
 
@@ -210,6 +279,204 @@ class MailPoolHubProviderTest(unittest.TestCase):
         self.assertEqual(404, context.exception.status)
         self.assertEqual("MAILBOX_NOT_FOUND", context.exception.code)
 
+    def test_unavailable_preference_falls_back_to_runtime_provider(self) -> None:
+        """验证已下线的保存渠道会被运行时健康清单替换。"""
+        provider = MailPoolHubProvider(
+            base_url=self.base_url,
+            api_key="local-test-token",
+            provider_name="removed-provider",
+            provider_names=["removed-provider", "fixture"],
+            request_timeout=3,
+        )
+        account = provider.create_account()
+        provider.close_account(account)
+        self.assertEqual("fixture", MailPoolHubContractHandler.last_create_payload["provider"])
+
+    def test_excluded_mailbox_domain_is_deleted_and_retried(self) -> None:
+        """验证 MailPoolHub 客户端会跳过持久黑名单域名。"""
+        provider = MailPoolHubProvider(
+            base_url=self.base_url,
+            api_key="local-test-token",
+            provider_name="fixture",
+        )
+        created = iter(
+            [
+                {"id": "blocked", "address": "first@blocked.test"},
+                {"id": "allowed", "address": "second@allowed.test"},
+            ]
+        )
+        deleted: list[str] = []
+
+        def request(method: str, pathname: str, **_kwargs) -> dict:
+            if method == "POST":
+                return next(created)
+            if method == "DELETE":
+                deleted.append(pathname)
+                return {"success": True}
+            raise AssertionError((method, pathname))
+
+        with patch.object(provider, "_request_json", side_effect=request):
+            account = provider.create_account(exclude_domains=["blocked.test"])
+        self.assertEqual("second@allowed.test", account["address"])
+        self.assertEqual(["/mailboxes/blocked"], deleted)
+
+
+class CloudAccountSyncTest(unittest.TestCase):
+    """验证新 Key 到 todo2api 管理 API 的持久同步。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), CloudSyncContractHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        host, port = cls.server.server_address
+        cls.base_url = f"http://{host}:{port}"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=3)
+
+    def setUp(self) -> None:
+        CloudSyncContractHandler.keys = []
+        CloudSyncContractHandler.origins = []
+        CloudSyncContractHandler.login_count = 0
+        CloudSyncContractHandler.bulk_count = 0
+        CloudSyncContractHandler.expire_once = False
+        CloudSyncContractHandler.fail_bulk = False
+        CloudSyncContractHandler.failed_keys = set()
+
+    def new_sync(self, directory: str) -> main.CloudAccountSync:
+        return main.CloudAccountSync(
+            self.base_url,
+            "admin",
+            "secret",
+            queue_dir=Path(directory),
+            timeout=3,
+        )
+
+    def test_save_result_immediately_adds_key_and_clears_queue(self) -> None:
+        key = "cloud-sync-fixture-key-value"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            sync = self.new_sync(directory)
+            with patch.object(main, "OUTPUT_FILE", output):
+                main.save_result(
+                    {"thread_id": 1, "api_keys": [{"key": key}], "default_key": None},
+                    sync,
+                )
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            self.assertEqual(0, sync.pending_count())
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertTrue(all(origin == self.base_url for origin in CloudSyncContractHandler.origins))
+            sync.enqueue([key])
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            sync.close()
+
+    def test_expired_admin_session_logs_in_again(self) -> None:
+        CloudSyncContractHandler.expire_once = True
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue(["reauth-fixture-key"])
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual(2, CloudSyncContractHandler.login_count)
+            sync.close()
+
+    def test_queue_write_failure_does_not_lose_local_key(self) -> None:
+        key = "queue-write-recovery-key"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            sync = self.new_sync(directory)
+            original_write = sync._write_pending
+            calls = 0
+
+            def flaky_write(keys: list[str]) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise OSError("fixture disk error")
+                original_write(keys)
+
+            with patch.object(sync, "_write_pending", side_effect=flaky_write), patch.object(
+                main, "OUTPUT_FILE", output
+            ):
+                main.save_result(
+                    {"thread_id": 1, "api_keys": [{"key": key}], "default_key": None},
+                    sync,
+                )
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            self.assertEqual(0, sync.pending_count())
+            sync.close()
+
+    def test_failed_sync_survives_restart_and_restores_local_key(self) -> None:
+        key = "persistent-cloud-queue-key"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            CloudSyncContractHandler.fail_bulk = True
+            sync = self.new_sync(directory)
+            sync.enqueue([key, key])
+            with patch.object(main, "log") as cloud_log:
+                self.assertEqual(1, sync.flush_pending())
+            self.assertNotIn(key, " ".join(str(call) for call in cloud_log.call_args_list))
+            sync.close()
+
+            CloudSyncContractHandler.fail_bulk = False
+            resumed = self.new_sync(directory)
+            self.assertEqual(1, resumed.reconcile_output(output))
+            self.assertEqual(0, resumed.flush_pending())
+            self.assertEqual([key], output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual([key], CloudSyncContractHandler.keys)
+            resumed.close()
+
+    def test_partial_failure_only_keeps_failed_key_pending(self) -> None:
+        good = "partial-good-key"
+        bad = "partial-failed-key"
+        CloudSyncContractHandler.failed_keys = {bad}
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue([good, bad])
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual([good], CloudSyncContractHandler.keys)
+            CloudSyncContractHandler.failed_keys.clear()
+            self.assertEqual(0, sync.flush_pending())
+            self.assertEqual([good, bad], CloudSyncContractHandler.keys)
+            sync.close()
+
+    def test_rejected_credentials_are_not_retried_in_same_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sync = main.CloudAccountSync(
+                self.base_url,
+                "admin",
+                "wrong-password",
+                queue_dir=Path(directory),
+            )
+            sync.enqueue(["auth-failure-key"])
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual(1, sync.flush_pending())
+            self.assertEqual(1, CloudSyncContractHandler.login_count)
+            sync.close()
+
+    def test_public_http_and_cross_target_queue_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            main.CloudAccountSync("http://example.com", "admin", "secret")
+        with tempfile.TemporaryDirectory() as directory:
+            sync = self.new_sync(directory)
+            sync.enqueue(["target-a-key"])
+            other = main.CloudAccountSync(
+                f"{self.base_url}/other",
+                "admin",
+                "secret",
+                queue_dir=Path(directory),
+            )
+            self.assertNotEqual(sync.queue_file, other.queue_file)
+            self.assertEqual(1, sync.pending_count())
+            self.assertEqual(0, other.pending_count())
+            sync.close()
+            other.close()
+
 
 class VerificationCodeTest(unittest.TestCase):
     """验证码字段与正文兜底提取测试。"""
@@ -241,7 +508,9 @@ class RegistrationFlowTest(unittest.TestCase):
         """验证主流程读取完整邮箱账户并在成功后删除邮箱。"""
         provider = _FakeMailProvider()
 
-        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(main.time, "sleep"):
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            main, "load_rejected_domains", return_value=set()
+        ), patch.object(main.time, "sleep"):
             result = main.process_one_account(
                 1,
                 lambda: provider,
@@ -256,6 +525,67 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual("mail.test", provider.created_domain)
         self.assertEqual(["blocked.test"], provider.created_exclude_domains)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
+
+    def test_request_interval_gate_spaces_concurrent_submissions(self) -> None:
+        """验证 OTP 门按配置间隔排队。"""
+        gate = main.RequestIntervalGate(7)
+        with patch.object(
+            main.time,
+            "monotonic",
+            side_effect=[10, 10, 10, 12, 12, 17, 17],
+        ), patch.object(
+            main.time, "sleep"
+        ) as sleep:
+            gate.wait()
+            gate.wait()
+        sleep.assert_called_once_with(5)
+
+    def test_request_interval_gate_reports_cooldown_wait(self) -> None:
+        """验证长冷却可通知注册流程刷新已过期邮箱。"""
+        gate = main.RequestIntervalGate(40)
+        gate.cooldown_until = 100
+        with patch.object(
+            main.time, "monotonic", side_effect=[0, 0, 100, 100]
+        ), patch.object(main.time, "sleep") as sleep:
+            waited = gate.wait_for_cooldown()
+        self.assertEqual(100, waited)
+        sleep.assert_called_once_with(100)
+
+    def test_concurrent_failures_are_replaced_until_success_target(self) -> None:
+        """验证失败任务会补位，且在途任务不会超过剩余成功数。"""
+        calls: list[int] = []
+
+        def worker(task_id: int, _initial_delay: float) -> dict | None:
+            calls.append(task_id)
+            return None if task_id <= 2 else {"thread_id": task_id}
+
+        with patch.object(main, "save_result") as save:
+            success, failed = main.run_concurrent_accounts(3, 3, worker)
+
+        self.assertEqual((3, 2), (success, failed))
+        self.assertEqual(5, len(calls))
+        self.assertEqual(3, save.call_count)
+
+    def test_exhausted_proxy_platforms_trigger_network_cooldown(self) -> None:
+        """验证全部代理失败时触发共享网络熔断。"""
+        gate = Mock()
+        gate.wait_for_cooldown.return_value = 0
+
+        with patch.object(main, "TodoforAI", _AlwaysInitFailsTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                proxies={"https": "http://node.{uuid}:token@127.0.0.1:9200"},
+                network_gate=gate,
+                network_cooldown_seconds=60,
+                proxy_attempts=2,
+                max_retries=1,
+            )
+
+        self.assertIsNone(result)
+        gate.defer.assert_called_once_with(60)
 
     def test_failure_also_closes_provider_account(self) -> None:
         """验证 OTP 发送失败时同样删除已创建邮箱。"""
@@ -278,10 +608,284 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(1, provider.create_count)
         self.assertEqual(["mailbox-1"], provider.closed_account_ids)
 
+    def test_browser_token_is_requested_after_protocol_challenge(self) -> None:
+        """验证纯协议失败后才通过同一代理取得浏览器令牌。"""
+        provider = _FakeMailProvider()
+        solver = Mock(
+            side_effect=lambda _proxy_url: (
+                self.assertEqual(1, provider.create_count) or "turnstile-token"
+            )
+        )
+
+        with patch.object(main, "TodoforAI", _CaptchaThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://us.{uuid}:token@127.0.0.1:9200"},
+                turnstile_solver=solver,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(1, solver.call_count)
+        proxy_url = solver.call_args.args[0]
+        self.assertNotIn("{uuid}", proxy_url)
+        self.assertTrue(proxy_url.startswith("http://us."))
+
+    def test_browser_is_skipped_when_protocol_otp_succeeds(self) -> None:
+        """验证目标接受纯协议请求时不会启动浏览器。"""
+        solver = Mock(return_value="unused-token")
+
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=solver,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        solver.assert_not_called()
+
+    def test_always_mode_sends_first_otp_with_browser_token(self) -> None:
+        """验证 always 模式不会先发送必然失败的无令牌请求。"""
+        tokens: list[str] = []
+
+        class BrowserFirstTodoforAI(_FakeTodoforAI):
+            def send_otp(self, email: str, captcha_token: str = "") -> bool:
+                tokens.append(captcha_token)
+                return captcha_token == "turnstile-token"
+
+        otp_gate = Mock()
+        otp_gate.wait_for_cooldown.return_value = 0
+        otp_gate.wait.return_value = 0
+        with patch.object(main, "TodoforAI", BrowserFirstTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=Mock(return_value="turnstile-token"),
+                turnstile_mode="always",
+                otp_gate=otp_gate,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(["turnstile-token"], tokens)
+        self.assertEqual(2, otp_gate.wait_for_cooldown.call_count)
+        otp_gate.wait.assert_called_once_with()
+
+    def test_anonymous_session_failure_rotates_before_creating_mailbox(self) -> None:
+        """验证坏代理会在创建邮箱前换 UUID。"""
+        provider = _FakeMailProvider()
+        _InitFailsOnceTodoforAI.instances = 0
+
+        with patch.object(main, "TodoforAI", _InitFailsOnceTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
+                max_retries=2,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, _InitFailsOnceTodoforAI.instances)
+        self.assertEqual(1, provider.create_count)
+        self.assertEqual(1, len(provider.closed_account_ids))
+
+    def test_turnstile_failure_rotates_proxy_and_retries(self) -> None:
+        """验证浏览器失败时同一邮箱换代理继续尝试。"""
+        provider = _FakeMailProvider()
+        solver = Mock(side_effect=[TimeoutError("probe timeout"), "turnstile-token"])
+
+        with patch.object(main, "TodoforAI", _CaptchaThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                proxies={"https": "http://jp.{uuid}:token@127.0.0.1:9200"},
+                proxy_platforms=["jp", "us"],
+                turnstile_solver=solver,
+                max_retries=1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, solver.call_count)
+        self.assertEqual(1, provider.create_count)
+        self.assertNotEqual(solver.call_args_list[0].args[0], solver.call_args_list[1].args[0])
+        self.assertTrue(main.urlparse(solver.call_args_list[0].args[0]).username.startswith("jp."))
+        self.assertTrue(main.urlparse(solver.call_args_list[1].args[0]).username.startswith("us."))
+
+    def test_missing_api_key_is_not_counted_as_success(self) -> None:
+        """验证登录成功但无 Key 时会重试而不是返回伪成功。"""
+        provider = _FakeMailProvider()
+        _NoKeysThenSuccessTodoforAI.instances = 0
+
+        with patch.object(main, "TodoforAI", _NoKeysThenSuccessTodoforAI), patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, lambda: provider, max_retries=2)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, provider.create_count)
+
+    def test_default_api_key_request_is_skipped_when_list_has_key(self) -> None:
+        """验证列表已有 Key 时不再发送冗余的默认 Key 请求。"""
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            _FakeTodoforAI,
+            "get_default_api_key",
+            side_effect=AssertionError("redundant getDefault request"),
+        ) as get_default, patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, _FakeMailProvider, max_retries=1)
+
+        self.assertIsNotNone(result)
+        get_default.assert_not_called()
+
+    def test_default_api_key_remains_fallback_when_list_is_empty(self) -> None:
+        """验证列表为空时仍通过默认 Key 完成注册。"""
+        default_key = {"key": "fixture-api-key-value"}
+        with patch.object(main, "TodoforAI", _FakeTodoforAI), patch.object(
+            _FakeTodoforAI, "get_api_keys", return_value=[]
+        ), patch.object(
+            _FakeTodoforAI, "get_default_api_key", return_value=default_key
+        ) as get_default, patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, _FakeMailProvider, max_retries=1)
+
+        self.assertEqual([default_key], result["api_keys"])
+        get_default.assert_called_once_with()
+
+    def test_delayed_api_key_is_polled_without_recreating_account(self) -> None:
+        """验证 Key 延迟生成时短轮询而不是重新注册。"""
+        provider = _FakeMailProvider()
+
+        class DelayedKeyTodoforAI(_FakeTodoforAI):
+            calls = 0
+
+            def get_api_keys(self) -> list[dict]:
+                type(self).calls += 1
+                return [] if type(self).calls == 1 else super().get_api_keys()
+
+            def get_default_api_key(self) -> dict | None:
+                return None
+
+        with patch.object(main, "TodoforAI", DelayedKeyTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(1, lambda: provider, max_retries=1)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(2, DelayedKeyTodoforAI.calls)
+        self.assertEqual(1, provider.create_count)
+
+    def test_rate_limit_retries_without_blacklisting_domain(self) -> None:
+        """验证 429 会退避重试但不会误判邮箱域名。"""
+        provider = _FakeMailProvider()
+        _RateLimitThenSuccessTodoforAI.instances = 0
+        otp_gate = Mock()
+        otp_gate.wait.return_value = 0
+
+        with patch.object(main, "TodoforAI", _RateLimitThenSuccessTodoforAI), patch.object(
+            main.time, "sleep"
+        ):
+            result = main.process_one_account(
+                1,
+                lambda: provider,
+                otp_gate=otp_gate,
+                otp_cooldown_seconds=600,
+                max_retries=2,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertNotIn("mail.test", provider.created_exclude_domains or [])
+        otp_gate.defer.assert_called_once_with(600)
+
+    def test_cooldown_race_refreshes_mailbox_before_otp_submission(self) -> None:
+        """验证冷却在 token 生成期间触发时不会提交过期邮箱。"""
+        todo = _CaptchaThenSuccessTodoforAI
+        otp_gate = Mock()
+        otp_gate.wait_for_cooldown.return_value = 0
+        otp_gate.wait.return_value = 3600
+
+        with patch.object(main, "TodoforAI", todo), patch.object(main.time, "sleep"):
+            result = main.process_one_account(
+                1,
+                _FakeMailProvider,
+                turnstile_solver=Mock(return_value="turnstile-token"),
+                turnstile_mode="always",
+                otp_gate=otp_gate,
+                max_retries=1,
+            )
+
+        self.assertIsNone(result)
+
+    def test_save_result_appends_to_existing_key_file(self) -> None:
+        """验证新一轮注册不会覆盖之前保存的 API Key。"""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "get_apikey.txt"
+            output.write_text("existing-api-key\n", encoding="utf-8")
+            with patch.object(main, "OUTPUT_FILE", output):
+                main.save_result(
+                    {
+                        "thread_id": 1,
+                        "api_keys": [{"key": "new-api-key-value"}],
+                        "default_key": None,
+                    }
+                )
+            self.assertEqual(
+                ["existing-api-key", "new-api-key-value"],
+                output.read_text(encoding="utf-8").splitlines(),
+            )
+
+    def test_rejected_domain_file_appends_once(self) -> None:
+        """验证明确拒绝域名会持久化且自动去重。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rejected_domains.txt"
+            with patch.object(main, "REJECTED_DOMAINS_FILE", path):
+                self.assertTrue(main.record_rejected_domain("Blocked.Test"))
+                self.assertFalse(main.record_rejected_domain("blocked.test"))
+                self.assertEqual({"blocked.test"}, main.load_rejected_domains())
+
+    def test_temporary_email_rejection_is_persisted_before_retry(self) -> None:
+        """验证目标拒绝后，重试创建邮箱时已带上持久黑名单。"""
+        provider = _FakeMailProvider()
+        addresses = iter(["first@blocked.test", "second@allowed.test"])
+        seen_exclusions: list[set[str]] = []
+
+        def create_account(
+            domain: str = "", exclude_domains: list[str] | None = None
+        ) -> dict:
+            address = next(addresses)
+            seen_exclusions.append(set(exclude_domains or []))
+            return {"id": address, "address": address, "domain": address.rsplit("@", 1)[-1]}
+
+        provider.create_account = create_account
+
+        class RejectOnce(_FakeTodoforAI):
+            attempts = 0
+
+            def send_otp(self, email: str, captcha_token: str = "") -> bool:
+                type(self).attempts += 1
+                if type(self).attempts == 1:
+                    self.last_otp_error_code = "HTTP_400"
+                    self.last_otp_error_message = "Temporary email addresses are not allowed."
+                    self.last_otp_status = 400
+                    return False
+                return True
+
+            def verify_otp(self, email: str, otp: str) -> dict | None:
+                return super().verify_otp("fixture@mail.test", otp)
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            main, "REJECTED_DOMAINS_FILE", Path(directory) / "rejected_domains.txt"
+        ), patch.object(main, "TodoforAI", RejectOnce), patch.object(main.time, "sleep"):
+            result = main.process_one_account(1, lambda: provider, max_retries=2)
+
+        self.assertIsNotNone(result)
+        self.assertIn("blocked.test", seen_exclusions[1])
+
     def test_send_otp_preserves_business_error(self) -> None:
         """验证 OTP 接口错误码和错误消息会传递给注册流程。"""
         todo = main.TodoforAI()
         response = Mock(status_code=400)
+        response.headers = {"Retry-After": "1200", "X-RateLimit-Reset": "fixture-reset"}
         response.json.return_value = {
             "code": "CAPTCHA_REQUIRED",
             "message": "Browser verification failed.",
@@ -292,6 +896,204 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual("CAPTCHA_REQUIRED", todo.last_otp_error_code)
         self.assertEqual("Browser verification failed.", todo.last_otp_error_message)
         self.assertEqual(400, todo.last_otp_status)
+        self.assertEqual(1200, todo.last_otp_retry_after)
+        self.assertEqual("fixture-reset", todo.last_otp_rate_limit_headers["X-RateLimit-Reset"])
+
+    def test_send_otp_adds_captcha_header(self) -> None:
+        """验证浏览器令牌通过目标网页使用的请求头提交。"""
+        todo = main.TodoforAI()
+        response = Mock(status_code=200)
+        response.headers = {}
+        response.json.return_value = {"success": True}
+        todo.session.post = Mock(return_value=response)
+
+        self.assertTrue(todo.send_otp("fixture@mail.test", "turnstile-token"))
+        headers = todo.session.post.call_args.kwargs["headers"]
+        self.assertEqual("turnstile-token", headers["x-captcha-response"])
+
+    def test_proxy_template_uses_one_uuid_per_session(self) -> None:
+        """验证 HTTP 和 HTTPS 代理共享同一个 Resin 粘性身份。"""
+        proxies = main.resolve_proxy_templates(
+            {
+                "http": "http://us.{uuid}:token@127.0.0.1:9200",
+                "https": "http://us.{uuid}:token@127.0.0.1:9200",
+            }
+        )
+        self.assertEqual(proxies["http"], proxies["https"])
+        self.assertNotIn("{uuid}", proxies["http"])
+
+    def test_resin_proxy_shorthand_is_normalized(self) -> None:
+        """验证启动器历史保存的 Resin 简写能转换成标准代理 URL。"""
+        shorthand = "http://node.{uuid}:fixture-token:9200"
+        normalized = main.normalize_proxy_url(shorthand)
+        self.assertEqual(
+            "http://node.{uuid}:fixture-token@127.0.0.1:9200",
+            normalized,
+        )
+        resolved = main.resolve_proxy_templates({"https": shorthand})["https"]
+        parsed = main.urlparse(resolved)
+        self.assertTrue(parsed.username.startswith("node."))
+        self.assertEqual("fixture-token", parsed.password)
+        self.assertEqual("127.0.0.1", parsed.hostname)
+        self.assertEqual(9200, parsed.port)
+
+    def test_standard_proxy_url_is_unchanged(self) -> None:
+        """验证标准代理 URL 不被重复改写。"""
+        proxy = "http://node.{uuid}:fixture-token@127.0.0.1:9200"
+        self.assertEqual(proxy, main.normalize_proxy_url(proxy))
+
+    def test_resin_platform_is_replaced_before_uuid_resolution(self) -> None:
+        """验证同一 Resin 模板可以轮换平台并保持粘性 UUID。"""
+        proxies = main.resolve_proxy_templates(
+            {"https": "http://node.{uuid}:fixture-token@127.0.0.1:9200"},
+            "jp",
+        )
+        parsed = main.urlparse(proxies["https"])
+        self.assertTrue(parsed.username.startswith("jp."))
+        self.assertNotIn("{uuid}", parsed.username)
+
+    def test_invalid_proxy_url_is_rejected(self) -> None:
+        """验证无法识别的代理配置会在批量任务启动前失败。"""
+        with self.assertRaisesRegex(ValueError, "代理 URL 无效"):
+            main.normalize_proxy_url("http://missing-port")
+
+    def test_interactive_launcher_builds_expected_command(self) -> None:
+        """验证交互启动器完整传递批量注册关键参数。"""
+        command = start_reg.build_command(
+            {
+                "count": 10,
+                "threads": 3,
+                "max_retries": 6,
+                "turnstile_concurrency": 2,
+                "turnstile_mode": "always",
+                "otp_interval_seconds": 40,
+                "otp_cooldown_seconds": 3600,
+                "network_cooldown_seconds": 60,
+                "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
+                "mailpoolhub_provider": "mailgw",
+                "proxy_url": "http://jp.{uuid}:token@127.0.0.1:9200",
+                "proxy_platforms": "node,jp,us",
+            }
+        )
+        self.assertIn("--count", command)
+        self.assertEqual("10", command[command.index("--count") + 1])
+        self.assertEqual("3", command[command.index("--threads") + 1])
+        self.assertEqual("mailgw", command[command.index("--mailpoolhub-provider") + 1])
+        self.assertEqual("always", command[command.index("--turnstile-mode") + 1])
+        self.assertEqual("40", command[command.index("--otp-interval") + 1])
+        self.assertEqual("3600", command[command.index("--otp-cooldown") + 1])
+        self.assertEqual("60", command[command.index("--network-cooldown") + 1])
+        self.assertEqual("node,jp,us", command[command.index("--proxy-platforms") + 1])
+        self.assertNotIn("--cloud-sync", command)
+
+    def test_launcher_passes_cloud_password_only_through_environment(self) -> None:
+        """验证云端密码不会出现在子进程命令行。"""
+        saved = {
+            "count": 1,
+            "threads": 1,
+            "max_retries": 1,
+            "turnstile_concurrency": 1,
+            "turnstile_mode": "always",
+            "otp_interval_seconds": 40,
+            "otp_cooldown_seconds": 3600,
+            "network_cooldown_seconds": 60,
+            "mailpoolhub_base_url": "http://127.0.0.1:8080/api/v1",
+            "mailpoolhub_provider": "random",
+            "mailpoolhub_api_key": "fixture-mail-key",
+            "proxy_url": "http://node.{uuid}:fixture-token@127.0.0.1:9200",
+            "proxy_platforms": "node,jp",
+            "cloud_sync_enabled": True,
+            "cloud_sync_base_url": "https://cloud.example.test",
+            "cloud_sync_admin_username": "admin",
+            "cloud_sync_admin_password": "cloud-secret",
+        }
+        with patch.object(start_reg, "load_settings", return_value=saved), patch.object(
+            start_reg, "prompt_int", side_effect=lambda _label, current, **_kwargs: current
+        ), patch.object(
+            start_reg, "prompt_text", side_effect=lambda _label, current: current
+        ), patch.object(
+            start_reg, "prompt_bool", side_effect=lambda _label, current: current
+        ), patch.object(
+            start_reg, "prompt_mail_provider", side_effect=lambda current: current
+        ), patch.object(start_reg, "save_settings"), patch.object(
+            start_reg, "run_registration", return_value=0
+        ) as run:
+            self.assertEqual(0, start_reg.main())
+
+        command, environment = run.call_args.args
+        self.assertIn("--cloud-sync", command)
+        self.assertEqual(
+            "https://cloud.example.test",
+            command[command.index("--cloud-sync-url") + 1],
+        )
+        self.assertNotIn("cloud-secret", command)
+        self.assertEqual("cloud-secret", environment["TODO2API_CLOUD_ADMIN_PASSWORD"])
+
+    def test_interactive_launcher_remembers_settings(self) -> None:
+        """验证启动器配置可原子保存并在下次启动复用。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            settings = {"count": 10, "threads": 3, "mailpoolhub_api_key": "fixture-key"}
+            start_reg.save_settings(settings, path)
+            self.assertEqual(settings, start_reg.load_settings(path))
+
+    def test_stale_saved_provider_defaults_to_random(self) -> None:
+        """验证旧渠道不在成功清单时回车会切换为随机。"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "working.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "channels": [
+                            {
+                                "provider": "verified",
+                                "attempts": 10,
+                                "successes": 8,
+                                "domains": [{"domain": "mail.test", "successes": 8}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(start_reg, "WORKING_CHANNELS_FILE", path), patch(
+                "builtins.input", return_value=""
+            ):
+                self.assertEqual("random", start_reg.prompt_mail_provider("removed"))
+
+    def test_interactive_launcher_force_stops_child_on_ctrl_c(self) -> None:
+        """验证 Ctrl+C 会终止注册及浏览器进程树并返回 130。"""
+        process = Mock()
+        process.stdout = io.StringIO("")
+        process.wait.side_effect = KeyboardInterrupt
+        with patch.object(start_reg.subprocess, "Popen", return_value=process) as popen, patch.object(
+            start_reg, "terminate_process_tree"
+        ) as terminate, patch.object(start_reg, "relay_output"):
+            result = start_reg.run_registration(["python", "main.py"], {})
+        self.assertEqual(130, result)
+        terminate.assert_called_once_with(process)
+        popen_options = popen.call_args.kwargs
+        self.assertEqual(start_reg.subprocess.CREATE_NEW_PROCESS_GROUP, popen_options["creationflags"])
+
+    def test_registration_log_rotates_at_configured_size(self) -> None:
+        """验证注册日志达到上限后轮转且单文件不超过限制。"""
+        with tempfile.TemporaryDirectory() as directory, patch("builtins.print"):
+            path = Path(directory) / "start_reg.log"
+            start_reg.relay_output(io.StringIO(("x" * 32 + "\n") * 20), path, 256)
+            files = [path, path.with_name(path.name + ".1")]
+            self.assertTrue(all(file.exists() for file in files))
+            self.assertTrue(all(file.stat().st_size <= 256 for file in files))
+
+    def test_windows_launcher_is_ascii_crlf(self) -> None:
+        """防止 cmd.exe 将 UTF-8/LF 批处理错误解析为残缺命令。"""
+        data = Path(start_reg.__file__).with_name("start_reg.bat").read_bytes()
+        data.decode("ascii")
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+        self.assertIn(
+            b'start "Todofor.ai Registration" python "%~dp0start_reg.py" --pause\r\n',
+            data,
+        )
+        self.assertNotIn(b"/wait /b", data)
 
     def test_factory_returns_independent_mailpoolhub_sessions(self) -> None:
         """验证并发任务不会共享 requests.Session。"""
@@ -311,6 +1113,19 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIsNot(first.session, second.session)
         self.assertFalse(first.session.trust_env)
+        self.assertLess(first.provider_cursor, len(first.provider_names))
+        self.assertLess(second.provider_cursor, len(second.provider_names))
+
+    def test_factory_accepts_mailpoolhub_provider_override(self) -> None:
+        """验证启动器可固定到已经实测成功的下游渠道。"""
+        factory, _ = main.create_mail_provider_factory(
+            "mailpoolhub",
+            {"mailpoolhub": {"api_key": "local-test-token"}},
+            mailpoolhub_provider_name="mailgw",
+        )
+        provider = factory()
+        self.assertEqual("mailgw", provider.provider_name)
+        self.assertEqual("mailgw", provider.provider_names[0])
 
     def test_factory_rejects_missing_mailpoolhub_api_key(self) -> None:
         """验证缺少 MailPoolHub API Key 时在启动阶段给出配置错误。"""
@@ -359,12 +1174,13 @@ class _FakeTodoforAI:
     def __init__(self, proxies: dict | None = None):
         """保存代理参数用于接口兼容。"""
         self.proxies = proxies
+        self.proxy_url = str((proxies or {}).get("https") or (proxies or {}).get("http") or "")
 
     def init_anonymous_session(self) -> bool:
         """模拟匿名会话创建成功。"""
         return True
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟向测试邮箱发送 OTP。"""
         return email == "fixture@mail.test"
 
@@ -396,7 +1212,7 @@ class _FakeTodoforAI:
 class _RejectingTodoforAI(_FakeTodoforAI):
     """模拟目标站拒绝发送 OTP 的客户端。"""
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟 OTP 发送失败。"""
         return False
 
@@ -408,8 +1224,81 @@ class _CaptchaRequiredTodoforAI(_FakeTodoforAI):
     last_otp_error_message = "Browser verification failed."
     last_otp_status = 400
 
-    def send_otp(self, email: str) -> bool:
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
         """模拟纯 HTTP 会话缺少浏览器验证令牌。"""
+        return False
+
+
+class _CaptchaThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟浏览器令牌到达后允许发送 OTP。"""
+
+    last_otp_error_code = ""
+    last_otp_error_message = ""
+    last_otp_status = 0
+
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
+        if captcha_token == "turnstile-token":
+            self.last_otp_error_code = ""
+            self.last_otp_error_message = ""
+            self.last_otp_status = 200
+            return True
+        self.last_otp_error_code = "CAPTCHA_REQUIRED"
+        self.last_otp_error_message = "Browser verification failed."
+        self.last_otp_status = 400
+        return False
+
+
+class _InitFailsOnceTodoforAI(_FakeTodoforAI):
+    """模拟首个代理出口初始化失败。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def init_anonymous_session(self) -> bool:
+        return type(self).instances > 1
+
+
+class _AlwaysInitFailsTodoforAI(_FakeTodoforAI):
+    """模拟所有代理平台均无法初始化会话。"""
+
+    def init_anonymous_session(self) -> bool:
+        return False
+
+
+class _NoKeysThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟首次登录后 API Key 尚未创建。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def get_api_keys(self) -> list[dict]:
+        return [] if type(self).instances == 1 else super().get_api_keys()
+
+    def get_default_api_key(self) -> dict | None:
+        return None if type(self).instances == 1 else super().get_default_api_key()
+
+
+class _RateLimitThenSuccessTodoforAI(_FakeTodoforAI):
+    """模拟首个会话触发 OTP 限速、第二个会话成功。"""
+
+    instances = 0
+
+    def __init__(self, proxies: dict | None = None):
+        super().__init__(proxies)
+        type(self).instances += 1
+
+    def send_otp(self, email: str, captcha_token: str = "") -> bool:
+        if type(self).instances > 1:
+            return True
+        self.last_otp_error_code = "HTTP_429"
+        self.last_otp_error_message = "Too many sign-in attempts."
+        self.last_otp_status = 429
         return False
 
 

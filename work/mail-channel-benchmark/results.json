@@ -1,0 +1,3602 @@
+[
+  {
+    "provider": "mailtm",
+    "attempt": 2,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 9.875
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 10.406
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 3,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 9.0
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 4,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 12.031
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Get \"https://api.mail.tm/domains?page=1\": EOF",
+    "elapsed_seconds": 4.484
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Get \"https://api.mail.tm/domains?page=1\": EOF",
+    "elapsed_seconds": 3.844
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 5,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 20.328
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 8,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 10.344
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 10,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.718
+  },
+  {
+    "provider": "mailtm",
+    "attempt": 9,
+    "status": "rejected_temp_email",
+    "domain": "emalupe.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 9.5
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 2,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "邮箱生成失败，已重试 5 次",
+    "elapsed_seconds": 17.578
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 3,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Get \"https://mailporary.com/zh\": EOF",
+    "elapsed_seconds": 3.532
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 4,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Get \"https://mailporary.com/zh\": EOF",
+    "elapsed_seconds": 3.75
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 5,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.187
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.203
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.235
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 8,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.187
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.188
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.25
+  },
+  {
+    "provider": "mailporary",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "anogz.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 34.641
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 1,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.031
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 2,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.031
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 4,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.016
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 3,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.016
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.016
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 5,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.031
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.015
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 8,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.016
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.016
+  },
+  {
+    "provider": "emailnator",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "连接 MailPoolHub 失败：HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=45)",
+    "elapsed_seconds": 45.015
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.125
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 2,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 8.375
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 3,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.516
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 4,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.625
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 5,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.344
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 6,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.719
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 7,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.921
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 8,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.437
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 10,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 4.875
+  },
+  {
+    "provider": "guerrillamail",
+    "attempt": 9,
+    "status": "rejected_temp_email",
+    "domain": "guerrillamailblock.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 9.375
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "inboxkitten.com",
+    "detail": "",
+    "elapsed_seconds": 154.875
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 2,
+    "status": "no_code",
+    "domain": "inboxkitten.com",
+    "detail": "",
+    "elapsed_seconds": 158.094
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 4,
+    "status": "no_code",
+    "domain": "inboxkitten.com",
+    "detail": "",
+    "elapsed_seconds": 146.968
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "inboxkitten.com",
+    "detail": "",
+    "elapsed_seconds": 155.5
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 6,
+    "status": "captcha_failed",
+    "domain": "inboxkitten.com",
+    "detail": "Too many sign-in attempts. Please try again later.",
+    "elapsed_seconds": 103.532
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "inboxkitten.com",
+    "detail": "",
+    "elapsed_seconds": 144.844
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 7,
+    "status": "captcha_failed",
+    "domain": "inboxkitten.com",
+    "detail": "Too many sign-in attempts. Please try again later.",
+    "elapsed_seconds": 178.219
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 8,
+    "status": "captcha_failed",
+    "domain": "inboxkitten.com",
+    "detail": "Too many sign-in attempts. Please try again later.",
+    "elapsed_seconds": 199.734
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 9,
+    "status": "captcha_failed",
+    "domain": "inboxkitten.com",
+    "detail": "Page.goto: net::ERR_CONNECTION_CLOSED at https://todofor.ai/\nCall log:\n  - navigating to \"https://todofor.ai/\", waiting until \"domcontentloaded\"\n",
+    "elapsed_seconds": 184.187
+  },
+  {
+    "provider": "inboxkitten",
+    "attempt": 10,
+    "status": "captcha_failed",
+    "domain": "inboxkitten.com",
+    "detail": "Too many sign-in attempts. Please try again later.",
+    "elapsed_seconds": 144.922
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.703
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 2,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.812
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 4,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.671
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 3,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.25
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 5,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.907
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 6,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.703
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 7,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.782
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 2,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Get \"https://api.mail.gw/domains?page=1\": EOF",
+    "elapsed_seconds": 5.891
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 1,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Post \"https://api.mail.gw/accounts\": EOF",
+    "elapsed_seconds": 26.906
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 3,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.219
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 4,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.188
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 5,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.25
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.204
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.281
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 8,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.375
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.297
+  },
+  {
+    "provider": "mailgw",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.219
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 2,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Post \"https://api.tempmail.lol/v2/inbox/create\": EOF",
+    "elapsed_seconds": 6.219
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 1,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Post \"https://api.tempmail.lol/v2/inbox/create\": EOF",
+    "elapsed_seconds": 6.047
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 3,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.469
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 4,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.329
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.438
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 5,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.329
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.454
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 8,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.329
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.329
+  },
+  {
+    "provider": "tempmail_lol",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.454
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 2,
+    "status": "rejected_temp_email",
+    "domain": "polysolextcoin.cloud",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.375
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "xsnipersquad.site",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.204
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 4,
+    "status": "rejected_temp_email",
+    "domain": "tubebox.us",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.844
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 5,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "创建 MailTemp 邮箱 HTTP 503: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>Access tempora",
+    "elapsed_seconds": 4.172
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 6,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "创建 MailTemp 邮箱 HTTP 503: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>Access tempora",
+    "elapsed_seconds": 1.579
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 7,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "创建 MailTemp 邮箱 HTTP 503: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>Access tempora",
+    "elapsed_seconds": 2.047
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 8,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.188
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.25
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "provider unhealthy",
+    "elapsed_seconds": 0.25
+  },
+  {
+    "provider": "mailtemp",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "gamerai.website",
+    "detail": "",
+    "elapsed_seconds": 265.235
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 9,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.703
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 8,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.485
+  },
+  {
+    "provider": "dropmail",
+    "attempt": 10,
+    "status": "rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 5.766
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 159.469
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 2,
+    "status": "no_code",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 213.875
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 154.718
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 4,
+    "status": "captcha_failed",
+    "domain": "mailcatch.com",
+    "detail": "Turnstile 求解失败：error:300030",
+    "elapsed_seconds": 169.859
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 5,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 26.375
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 6,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 28.61
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 22.672
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 22.188
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 26.36
+  },
+  {
+    "provider": "mailcatch",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "mailcatch.com",
+    "detail": "",
+    "elapsed_seconds": 27.797
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "momroad.org",
+    "detail": "",
+    "elapsed_seconds": 145.016
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 2,
+    "status": "no_code",
+    "domain": "sydney.edu.pl",
+    "detail": "",
+    "elapsed_seconds": 149.125
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 4,
+    "status": "no_code",
+    "domain": "melbourne.edu.pl",
+    "detail": "",
+    "elapsed_seconds": 142.344
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "damphen.org",
+    "detail": "",
+    "elapsed_seconds": 160.515
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "momroad.org",
+    "detail": "",
+    "elapsed_seconds": 147.078
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 6,
+    "status": "no_code",
+    "domain": "momroad.org",
+    "detail": "",
+    "elapsed_seconds": 143.906
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "melbourne.edu.pl",
+    "detail": "",
+    "elapsed_seconds": 19.594
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 8,
+    "status": "no_code",
+    "domain": "comproa.org",
+    "detail": "",
+    "elapsed_seconds": 147.766
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 9,
+    "status": "no_code",
+    "domain": "momroad.org",
+    "detail": "",
+    "elapsed_seconds": 148.344
+  },
+  {
+    "provider": "smailpro",
+    "attempt": 10,
+    "status": "no_code",
+    "domain": "melbourne.edu.pl",
+    "detail": "",
+    "elapsed_seconds": 139.922
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 1,
+    "status": "rejected_temp_email",
+    "domain": "jywa.social",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.453
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 2,
+    "status": "rejected_temp_email",
+    "domain": "makeraura.online",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.125
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "tubebox.us",
+    "detail": "",
+    "elapsed_seconds": 4.297
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 4,
+    "status": "rejected_temp_email",
+    "domain": "thueotp.net",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.328
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 6,
+    "status": "no_code",
+    "domain": "b20nn6.cn",
+    "detail": "",
+    "elapsed_seconds": 98.406
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "thenovagroup.site",
+    "detail": "",
+    "elapsed_seconds": 108.109
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 7,
+    "status": "rejected_temp_email",
+    "domain": "bhana.xyz",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 7.859
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 8,
+    "status": "rejected_temp_email",
+    "domain": "docash.app",
+    "detail": "Temporary email addresses are not allowed. Please use a permanent email address.",
+    "elapsed_seconds": 6.359
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 9,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Generator.Email 校验 HTTP 405: <html>\r\n<head><title>405 Not Allowed</title></head>\r\n<body>\r\n<center><h1>405 Not Allowed</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly",
+    "elapsed_seconds": 3.922
+  },
+  {
+    "provider": "generator_email",
+    "attempt": 10,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "Generator.Email 校验 HTTP 405: <html>\r\n<head><title>405 Not Allowed</title></head>\r\n<body>\r\n<center><h1>405 Not Allowed</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n<!-- a padding to disable MSIE and Chrome friendly",
+    "elapsed_seconds": 3.468
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 4.313
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 2.36
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 3.641
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 2.438
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 3.328
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 3.047
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 3.078
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 3.032
+  },
+  {
+    "provider": "mailtowin",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mailtowin.com",
+    "detail": "",
+    "elapsed_seconds": 2.407
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.563
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.766
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.766
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 3.938
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.86
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.672
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.641
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "mail2me",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mail2me.co",
+    "detail": "",
+    "elapsed_seconds": 3.235
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 3.063
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 3.031
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 3.219
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.547
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.891
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.687
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.719
+  },
+  {
+    "provider": "pickmemail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmemail.com",
+    "detail": "",
+    "elapsed_seconds": 2.891
+  },
+  {
+    "provider": "maximail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "maximail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.641
+  },
+  {
+    "provider": "maximail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "maximail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.641
+  },
+  {
+    "provider": "maximail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "maximail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.687
+  },
+  {
+    "provider": "maximail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "maximail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "maximail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 2.297
+  },
+  {
+    "provider": "maximail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "maximail.vip",
+    "detail": "",
+    "elapsed_seconds": 3.046
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 3.235
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 2.313
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 3.375
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 2.141
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 2.61
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 3.36
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 3.203
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 2.953
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 2.594
+  },
+  {
+    "provider": "emlpro",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "emlpro.com",
+    "detail": "",
+    "elapsed_seconds": 4.016
+  },
+  {
+    "provider": "freeml",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 3.297
+  },
+  {
+    "provider": "freeml",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 3.0
+  },
+  {
+    "provider": "freeml",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 3.281
+  },
+  {
+    "provider": "freeml",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "freeml",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.969
+  },
+  {
+    "provider": "freeml",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.75
+  },
+  {
+    "provider": "freeml",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "freeml",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.906
+  },
+  {
+    "provider": "freeml",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.985
+  },
+  {
+    "provider": "freeml",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "freeml.net",
+    "detail": "",
+    "elapsed_seconds": 2.719
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 3.125
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 3.156
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 2.766
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 3.063
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 2.86
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 3.078
+  },
+  {
+    "provider": "emlhub",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "emlhub.com",
+    "detail": "",
+    "elapsed_seconds": 3.313
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.781
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 2.562
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 2.953
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.14
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.047
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 2.922
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.329
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.312
+  },
+  {
+    "provider": "emltmp",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "emltmp.com",
+    "detail": "",
+    "elapsed_seconds": 3.047
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.688
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.891
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.157
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.813
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.625
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.75
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.594
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "mailpwr",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mailpwr.com",
+    "detail": "",
+    "elapsed_seconds": 2.672
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.313
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 2.125
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.344
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.204
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 2.954
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 2.782
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.0
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.094
+  },
+  {
+    "provider": "tenmail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "10mail.info",
+    "detail": "",
+    "elapsed_seconds": 3.219
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.016
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.281
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.109
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.375
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.0
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.219
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 3.344
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 2.219
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 2.75
+  },
+  {
+    "provider": "dropmail_me",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "dropmail.me",
+    "detail": "",
+    "elapsed_seconds": 2.906
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.625
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.813
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.922
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.75
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.859
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.922
+  },
+  {
+    "provider": "mimimail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mimimail.me",
+    "detail": "",
+    "elapsed_seconds": 2.688
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.672
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.843
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.406
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 3.578
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 3.031
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 3.187
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.828
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.64
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "pickmail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "pickmail.org",
+    "detail": "",
+    "elapsed_seconds": 2.687
+  },
+  {
+    "provider": "spymail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.813
+  },
+  {
+    "provider": "spymail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.985
+  },
+  {
+    "provider": "spymail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 3.422
+  },
+  {
+    "provider": "spymail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 3.25
+  },
+  {
+    "provider": "spymail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.688
+  },
+  {
+    "provider": "spymail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "spymail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.625
+  },
+  {
+    "provider": "spymail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.984
+  },
+  {
+    "provider": "spymail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.657
+  },
+  {
+    "provider": "spymail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "spymail.one",
+    "detail": "",
+    "elapsed_seconds": 2.797
+  },
+  {
+    "provider": "yomail",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 3.609
+  },
+  {
+    "provider": "yomail",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 2.859
+  },
+  {
+    "provider": "yomail",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 3.203
+  },
+  {
+    "provider": "yomail",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 3.0
+  },
+  {
+    "provider": "yomail",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 4.296
+  },
+  {
+    "provider": "yomail",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 4.5
+  },
+  {
+    "provider": "yomail",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 2.406
+  },
+  {
+    "provider": "yomail",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 4.359
+  },
+  {
+    "provider": "yomail",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 3.89
+  },
+  {
+    "provider": "yomail",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "yomail.info",
+    "detail": "",
+    "elapsed_seconds": 2.89
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.797
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.969
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.844
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.672
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.922
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 5.813
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.656
+  },
+  {
+    "provider": "tmio_bltiwd",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.187
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.39
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.25
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.438
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.516
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.125
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 3.344
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "tmio_wnbaldwy",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 2.625
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 3.234
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 2.906
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 3.125
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 2.5
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 4.031
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 3.297
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 3.422
+  },
+  {
+    "provider": "tmio_bwmyga",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "bwmyga.com",
+    "detail": "",
+    "elapsed_seconds": 4.859
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 3.125
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 3.343
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 2.562
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 2.734
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 4.078
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 2.281
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 4.593
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 3.422
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 2.937
+  },
+  {
+    "provider": "tmio_ozsaip",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "ozsaip.com",
+    "detail": "",
+    "elapsed_seconds": 3.156
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 3.203
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.985
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 3.094
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.891
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.735
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.75
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.953
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.688
+  },
+  {
+    "provider": "tmio_yzcalo",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "yzcalo.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 3.0
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.875
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.672
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.641
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.844
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.922
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.703
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 3.062
+  },
+  {
+    "provider": "tmio_lnovic",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "lnovic.com",
+    "detail": "",
+    "elapsed_seconds": 2.687
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.859
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.671
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.687
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.843
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.656
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.828
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 3.015
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 2.828
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 3.281
+  },
+  {
+    "provider": "tmio_ruutukf",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "ruutukf.com",
+    "detail": "",
+    "elapsed_seconds": 3.078
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 5.047
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.86
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.703
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.875
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.672
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.86
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.656
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.828
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.906
+  },
+  {
+    "provider": "tmio_gmeenramy",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "bltiwd.com",
+    "detail": "",
+    "elapsed_seconds": 4.703
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 2,
+    "status": "mailbox_create_failed",
+    "domain": "",
+    "detail": "GoneBox 创建邮箱 HTTP 500: {\"success\":false,\"error\":{\"message\":\"Internal server error\",\"code\":\"INTERNAL_ERROR\",\"status\":500}}",
+    "elapsed_seconds": 1.656
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 81.234
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 83.297
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 4,
+    "status": "no_code",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 82.875
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 102.516
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 6,
+    "status": "rate_limited",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 94.625
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 23.062
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 7,
+    "status": "no_code",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 82.344
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 24.344
+  },
+  {
+    "provider": "gonebox",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "gonebox.email",
+    "detail": "",
+    "elapsed_seconds": 27.625
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "inboxfly.space",
+    "detail": "",
+    "elapsed_seconds": 106.36
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 2,
+    "status": "no_code",
+    "domain": "getemail.space",
+    "detail": "",
+    "elapsed_seconds": 173.438
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "inboxopen.space",
+    "detail": "",
+    "elapsed_seconds": 83.266
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 4,
+    "status": "no_code",
+    "domain": "inboxopen.space",
+    "detail": "",
+    "elapsed_seconds": 121.735
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "getemail.space",
+    "detail": "",
+    "elapsed_seconds": 108.969
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 7,
+    "status": "no_code",
+    "domain": "getemail.space",
+    "detail": "",
+    "elapsed_seconds": 85.703
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 6,
+    "status": "no_code",
+    "domain": "getemail.space",
+    "detail": "",
+    "elapsed_seconds": 143.672
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 8,
+    "status": "no_code",
+    "domain": "inboxfly.space",
+    "detail": "",
+    "elapsed_seconds": 80.454
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 10,
+    "status": "no_code",
+    "domain": "getemail.space",
+    "detail": "",
+    "elapsed_seconds": 81.0
+  },
+  {
+    "provider": "openinbox",
+    "attempt": 9,
+    "status": "no_code",
+    "domain": "inboxfly.space",
+    "detail": "",
+    "elapsed_seconds": 162.219
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "fontdle.com",
+    "detail": "",
+    "elapsed_seconds": 88.141
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 2,
+    "status": "no_code",
+    "domain": "beatnesia.my.id",
+    "detail": "",
+    "elapsed_seconds": 94.219
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "melodyhub.my.id",
+    "detail": "",
+    "elapsed_seconds": 82.203
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 4,
+    "status": "no_code",
+    "domain": "melodyhub.my.id",
+    "detail": "",
+    "elapsed_seconds": 85.781
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 5,
+    "status": "no_code",
+    "domain": "audiovibe.my.id",
+    "detail": "",
+    "elapsed_seconds": 80.922
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 6,
+    "status": "no_code",
+    "domain": "melodyhub.my.id",
+    "detail": "",
+    "elapsed_seconds": 123.672
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 8,
+    "status": "no_code",
+    "domain": "beatnesia.my.id",
+    "detail": "",
+    "elapsed_seconds": 87.125
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 7,
+    "status": "no_code",
+    "domain": "fontdle.com",
+    "detail": "",
+    "elapsed_seconds": 150.984
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 9,
+    "status": "no_code",
+    "domain": "beatnesia.my.id",
+    "detail": "",
+    "elapsed_seconds": 84.078
+  },
+  {
+    "provider": "blinkbox",
+    "attempt": 10,
+    "status": "no_code",
+    "domain": "beatnesia.my.id",
+    "detail": "",
+    "elapsed_seconds": 84.469
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 2,
+    "status": "ok",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 40.297
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 1,
+    "status": "ok",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 76.437
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 3,
+    "status": "ok",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 45.813
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 4,
+    "status": "ok",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 54.891
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 5,
+    "status": "ok",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 44.625
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 6,
+    "status": "rate_limited",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 24.219
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 25.531
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 26.187
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 25.203
+  },
+  {
+    "provider": "throwawaymail",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "throwawaymail.app",
+    "detail": "",
+    "elapsed_seconds": 19.36
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.485
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.735
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 2.047
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.782
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.891
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.704
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 2.016
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 1.813
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 2.079
+  },
+  {
+    "provider": "mailnesia",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mailnesia.com",
+    "detail": "",
+    "elapsed_seconds": 2.282
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 1,
+    "status": "no_code",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 83.688
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 2,
+    "status": "ok",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 84.391
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 4,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 37.125
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 5,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 22.359
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 6,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 19.766
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 3,
+    "status": "no_code",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 89.781
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 4.235
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 3.828
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "mailforspam.com",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 3.657
+  },
+  {
+    "provider": "mailforspam",
+    "attempt": 10,
+    "status": "ok",
+    "domain": "mailforspam.com",
+    "detail": "",
+    "elapsed_seconds": 122.266
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 1,
+    "status": "ok",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 47.875
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 2,
+    "status": "ok",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 47.875
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 3,
+    "status": "rate_limited",
+    "domain": "catchmail.io",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 4.5
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 4,
+    "status": "rate_limited",
+    "domain": "catchmail.io",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 4.563
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 6,
+    "status": "ok",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 42.656
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 5,
+    "status": "ok",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 42.797
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 28.406
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 7,
+    "status": "ok",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 37.5
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 22.016
+  },
+  {
+    "provider": "catchmail_io",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "catchmail.io",
+    "detail": "",
+    "elapsed_seconds": 40.641
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 2,
+    "status": "ok",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 44.453
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 1,
+    "status": "ok",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 45.453
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 4,
+    "status": "ok",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 33.5
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 5,
+    "status": "ok",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 30.859
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 3,
+    "status": "ok",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 87.25
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 6,
+    "status": "rate_limited",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 20.922
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 29.844
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 28.781
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 25.734
+  },
+  {
+    "provider": "mailistry",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "mailistry.com",
+    "detail": "",
+    "elapsed_seconds": 27.687
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 2,
+    "status": "rate_limited",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 27.0
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 1,
+    "status": "ok",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 37.532
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 3,
+    "status": "ok",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 35.781
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 5,
+    "status": "ok",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 37.407
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 6,
+    "status": "ok",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 43.516
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 4,
+    "status": "exception",
+    "domain": "zeppost.com",
+    "detail": "HTTPSConnectionPool(host='api.todofor.ai', port=443): Max retries exceeded with url: /trpc/cookie/apiKey.list?batch=1&input=%7B%220%22%3A%7B%7D%7D (Caused by ProxyError('Unable to connect to proxy', RemoteDisconnected('Remote end closed con",
+    "elapsed_seconds": 111.015
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 8,
+    "status": "rate_limited",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 104.906
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 7,
+    "status": "rate_limited",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 120.5
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 9,
+    "status": "rate_limited",
+    "domain": "zeppost.com",
+    "detail": "Too many requests. Please try again later.",
+    "elapsed_seconds": 5.36
+  },
+  {
+    "provider": "zeppost",
+    "attempt": 10,
+    "status": "rate_limited",
+    "domain": "zeppost.com",
+    "detail": "",
+    "elapsed_seconds": 44.875
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 1,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.593
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 2,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.781
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 3,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.812
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 4,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.969
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 5,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.563
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 6,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 1.891
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 7,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 2.156
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 8,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 2.375
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 10,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 2.625
+  },
+  {
+    "provider": "mailsac",
+    "attempt": 9,
+    "status": "known_rejected_temp_email",
+    "domain": "mailsac.com",
+    "detail": "",
+    "elapsed_seconds": 2.391
+  }
+]

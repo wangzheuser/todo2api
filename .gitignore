@@ -1,8 +1,11 @@
 # Local configuration and secrets
 config.yaml
+!/deploy/config.yaml
 .env
 .env.*
 *.env
+!.env.example
+reg/start_reg.settings.json
 
 # Build and test output
 /todo2api
@@ -27,3 +30,6 @@ api_keys.txt
 *.exe
 build/
 build.bat
+
+# Local deployment execution evidence
+/work/deploy-us/

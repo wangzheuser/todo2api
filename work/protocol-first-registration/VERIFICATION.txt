@@ -1,0 +1,42 @@
+CHANGED_BRANCH: dev
+CHANGED_FIELD: protocol-first OTP submission with lazy Turnstile fallback and same-mailbox Resin proxy rotation
+
+ARTIFACTS:
+MODIFIED_FILE: D:/projects/github/todo2api/work/protocol-first-registration/MODIFIED_FILE
+DIFF_FILE: D:/projects/github/todo2api/work/protocol-first-registration/DIFF_FILE
+VERIFICATION.txt: D:/projects/github/todo2api/work/protocol-first-registration/VERIFICATION.txt
+ROLLBACK.sh: D:/projects/github/todo2api/work/protocol-first-registration/ROLLBACK.sh
+
+ORIGINAL_SHA256: ee8a250fd3fb9687c48369538bf9a484fb3c25009e3f7d99db4925b9b2119924
+MODIFIED_SHA256: 89d6064bb4b29284c4c961a7cd88f761c822e9f7356a01e5f0291eacf5dc8f35
+
+BASELINE:
+COMMAND: python -m py_compile reg/main.py reg/mail_providers.py reg/start_reg.py reg/test_mail_providers.py; cd reg; python -m unittest test_mail_providers.py
+INPUT: dev a33553d8895944795a7efa7bd6b10522c9043043
+LITERAL_OUTPUT_RESULT: Ran 32 tests in 1.575s / OK
+EXIT_STATUS: 0
+
+BASELINE_PROTOCOL_ONLY:
+COMMAND: python main.py --config <temporary turnstile.enabled=false config> --mail-provider mailpoolhub --mailpoolhub-provider random --max-retries 1 --count 1 --threads 1
+INPUT: ignored local MailPoolHub/proxy settings; get_apikey.txt lines=82
+LITERAL_OUTPUT_RESULT: CAPTCHA_REQUIRED / success=0 / failure=1 / BASELINE_APIKEY_LINES_AFTER=82 / BASELINE_PROTOCOL_ONLY_EXIT=1
+EXIT_STATUS: 1
+
+MODIFIED:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: current reg/main.py, reg/mail_providers.py, reg/start_reg.py, reg/test_mail_providers.py
+LITERAL_OUTPUT_RESULT: Ran 33 tests in 1.664s / OK
+EXIT_STATUS: 0
+
+MODIFIED_CONCURRENT_LIVE:
+COMMAND: python main.py --mail-provider mailpoolhub --mailpoolhub-provider random --max-retries 5 --turnstile-concurrency 2 --count 2 --threads 2
+INPUT: ignored local MailPoolHub/proxy settings; get_apikey.txt lines=83
+LITERAL_OUTPUT_RESULT: success=2 / failure=0 / elapsed=84.3s / CONCURRENT_APIKEY_LINES_AFTER=85 / CONCURRENT_APIKEY_LINES_ADDED=2 / CONCURRENT_REG_EXIT=0
+EXIT_STATUS: 0
+
+ROLLBACK:
+COMMAND: C:/Program Files/Git/bin/bash.exe -lc "ROLLBACK.sh ROLLBACK_TEST_FILE"
+INPUT: ROLLBACK_TEST_FILE copied from MODIFIED_FILE, SHA256 89d6064bb4b29284c4c961a7cd88f761c822e9f7356a01e5f0291eacf5dc8f35
+LITERAL_OUTPUT_RESULT: ee8a250fd3fb9687c48369538bf9a484fb3c25009e3f7d99db4925b9b2119924 *ROLLBACK_TEST_FILE / ROLLBACK_EXIT=0
+EXIT_STATUS: 0
+RESTORED_BEHAVIOR_STATUS: rollback test copy matches the original main.py hash; MODIFIED_FILE remains changed with SHA256 89d6064bb4b29284c4c961a7cd88f761c822e9f7356a01e5f0291eacf5dc8f35.

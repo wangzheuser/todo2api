@@ -1,0 +1,26 @@
+{
+  "model": "muse-glimmer-30b",
+  "catalog_context_length": 131072,
+  "catalog_max_completion_tokens": 16384,
+  "successful_prompt_token_samples": [
+    10822,
+    110494,
+    124499,
+    132497,
+    200497,
+    300499,
+    500499,
+    510497,
+    515501,
+    520497,
+    522491,
+    523004
+  ],
+  "largest_verified_prompt_tokens": 523004,
+  "first_higher_run_failure": {
+    "requested_repetitions": 523000,
+    "result": "upstream todo run ended with status ERROR"
+  },
+  "terminal_condition": "single tested key exhausted its 2 USD credit limit; no second key was used",
+  "final_balance": -0.0027138099999992893
+}

@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-08-31T21:05:13.934829+00:00",
+  "attempts_per_provider": 10,
+  "concurrency": 2,
+  "channels": [
+    {
+      "provider": "catchmail_io",
+      "attempts": 10,
+      "successes": 5,
+      "success_rate": 0.5,
+      "domains": [
+        {
+          "domain": "catchmail.io",
+          "successes": 5
+        }
+      ]
+    },
+    {
+      "provider": "mailistry",
+      "attempts": 10,
+      "successes": 5,
+      "success_rate": 0.5,
+      "domains": [
+        {
+          "domain": "mailistry.com",
+          "successes": 5
+        }
+      ]
+    },
+    {
+      "provider": "throwawaymail",
+      "attempts": 10,
+      "successes": 5,
+      "success_rate": 0.5,
+      "domains": [
+        {
+          "domain": "throwawaymail.app",
+          "successes": 5
+        }
+      ]
+    },
+    {
+      "provider": "zeppost",
+      "attempts": 10,
+      "successes": 4,
+      "success_rate": 0.4,
+      "domains": [
+        {
+          "domain": "zeppost.com",
+          "successes": 4
+        }
+      ]
+    },
+    {
+      "provider": "mailforspam",
+      "attempts": 10,
+      "successes": 2,
+      "success_rate": 0.2,
+      "domains": [
+        {
+          "domain": "mailforspam.com",
+          "successes": 2
+        }
+      ]
+    }
+  ]
+}

@@ -24,7 +24,6 @@ Todofor.ai 批量注册机
 import os
 import sys
 import json
-import hashlib
 import time
 import threading
 import argparse
@@ -62,7 +61,6 @@ DEFAULT_CONFIG_FILE = SCRIPT_DIR / "config.json"
 OUTPUT_FILE = SCRIPT_DIR / "get_apikey.txt"
 REJECTED_DOMAINS_FILE = SCRIPT_DIR / "rejected_domains.txt"
 WORKING_MAIL_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
-CLOUD_SYNC_PASSWORD_ENV = "TODO2API_CLOUD_ADMIN_PASSWORD"
 
 # 线程安全锁
 FILE_LOCK = threading.Lock()
@@ -105,205 +103,6 @@ class RequestIntervalGate:
                 self.cooldown_until,
                 time.monotonic() + max(0.0, float(seconds)),
             )
-
-
-class CloudAccountSync:
-    """通过 todo2api 管理会话持久同步新注册的 API Key。"""
-
-    def __init__(
-        self,
-        base_url: str,
-        username: str,
-        password: str,
-        *,
-        queue_dir: Path = SCRIPT_DIR,
-        timeout: int = 15,
-    ):
-        parsed = urlparse(str(base_url or "").strip())
-        host = (parsed.hostname or "").casefold()
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("云端项目地址必须是完整的 HTTP(S) URL")
-        if parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("公网云端同步必须使用 HTTPS")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("云端项目地址不能包含凭据、查询参数或片段")
-        if not str(username or "").strip() or not password:
-            raise ValueError("云端管理员账号和密码不能为空")
-
-        origin_host = parsed.netloc
-        self.origin = f"{parsed.scheme}://{origin_host}"
-        self.base_url = f"{self.origin}{parsed.path.rstrip('/')}"
-        self.username = str(username).strip()
-        self.password = str(password)
-        self.timeout = max(1, int(timeout))
-        target_hash = hashlib.sha256(self.base_url.encode("utf-8")).hexdigest()[:12]
-        self.queue_file = queue_dir / f"cloud_sync_pending.{target_hash}.json"
-        self.lock = threading.Lock()
-        self.session = requests.Session()
-        self.session.trust_env = False
-        self.auth_failed = False
-        self.last_error = ""
-        self.memory_pending: list[str] = []
-        self._load_pending()
-
-    def _load_pending(self) -> list[str]:
-        try:
-            body = json.loads(self.queue_file.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return []
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"读取云端同步队列失败: {error}") from error
-        if not isinstance(body, dict) or body.get("base_url") != self.base_url:
-            raise ValueError("云端同步队列目标与当前配置不一致")
-        values = body.get("keys")
-        if not isinstance(values, list):
-            raise ValueError("云端同步队列格式无效")
-        return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-
-    def _write_pending(self, keys: list[str]) -> None:
-        temporary = self.queue_file.with_suffix(".tmp")
-        with open(temporary, "w", encoding="utf-8") as output:
-            json.dump({"base_url": self.base_url, "keys": keys}, output, ensure_ascii=False)
-            output.flush()
-            os.fsync(output.fileno())
-        temporary.replace(self.queue_file)
-
-    def enqueue(self, keys: list[str]) -> None:
-        with self.lock:
-            pending = self._load_pending()
-            added = [str(key).strip() for key in keys if str(key).strip()]
-            pending.extend(added)
-            try:
-                self._write_pending(list(dict.fromkeys(pending)))
-            except OSError as error:
-                self.memory_pending = list(dict.fromkeys(self.memory_pending + added))
-                self.last_error = f"写入待同步队列失败: {error}"
-
-    def reconcile_output(self, output_file: Path) -> int:
-        """把崩溃窗口中仅存在于队列的 Key 补回本地输出。"""
-        with self.lock:
-            pending = self._load_pending()
-        if not pending:
-            return 0
-        try:
-            existing = set(output_file.read_text(encoding="utf-8").splitlines())
-        except OSError:
-            existing = set()
-        missing = [key for key in pending if key not in existing]
-        if missing:
-            with open(output_file, "a", encoding="utf-8") as output:
-                output.writelines(f"{key}\n" for key in missing)
-                output.flush()
-                os.fsync(output.fileno())
-        return len(missing)
-
-    def pending_count(self) -> int:
-        with self.lock:
-            return len(set(self._load_pending()) | set(self.memory_pending))
-
-    def _login(self) -> bool:
-        if self.auth_failed:
-            return False
-        try:
-            response = self.session.post(
-                f"{self.base_url}/api/auth/login",
-                json={"username": self.username, "password": self.password},
-                headers={"Origin": self.origin},
-                timeout=self.timeout,
-            )
-        except requests.RequestException as error:
-            self.last_error = str(error).splitlines()[0]
-            return False
-        if response.status_code != 200:
-            self.last_error = f"管理员登录返回 HTTP {response.status_code}"
-            if response.status_code in {401, 403, 429}:
-                self.auth_failed = True
-            return False
-        self.last_error = ""
-        return True
-
-    def _post_keys(self, keys: list[str]) -> requests.Response | None:
-        try:
-            return self.session.post(
-                f"{self.base_url}/api/accounts/bulk",
-                json={"keys": keys},
-                headers={"Origin": self.origin},
-                timeout=self.timeout,
-            )
-        except requests.RequestException as error:
-            self.last_error = str(error).splitlines()[0]
-            return None
-
-    def flush_pending(self) -> int:
-        """同步当前目标的全部积压，返回剩余数量。"""
-        with self.lock:
-            pending = self._load_pending()
-            if self.memory_pending:
-                pending = list(dict.fromkeys(pending + self.memory_pending))
-                try:
-                    self._write_pending(pending)
-                except OSError as error:
-                    self.last_error = f"写入待同步队列失败: {error}"
-                    log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-                    return len(pending)
-                self.memory_pending = []
-            while pending and not self.auth_failed:
-                batch = pending[:1000]
-                if not self.session.cookies and not self._login():
-                    break
-                response = self._post_keys(batch)
-                if response is None:
-                    break
-                if response.status_code == 401:
-                    self.session.cookies.clear()
-                    if not self._login():
-                        break
-                    response = self._post_keys(batch)
-                    if response is None:
-                        break
-                if response.status_code != 200:
-                    self.last_error = f"账号导入返回 HTTP {response.status_code}"
-                    if response.status_code in {401, 403}:
-                        self.auth_failed = True
-                    break
-                try:
-                    body = response.json()
-                    results = body["results"]
-                except (ValueError, KeyError, TypeError):
-                    self.last_error = "账号导入响应格式无效"
-                    break
-                if not isinstance(results, list) or len(results) != len(batch):
-                    self.last_error = "账号导入响应数量不匹配"
-                    break
-                synced = {
-                    key
-                    for key, item in zip(batch, results)
-                    if isinstance(item, dict) and item.get("status") in {"created", "duplicate"}
-                }
-                pending = [key for key in pending if key not in synced]
-                try:
-                    self._write_pending(pending)
-                except OSError as error:
-                    self.last_error = f"更新待同步队列失败: {error}"
-                    pending = self._load_pending()
-                    log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-                    return len(pending)
-                failed = len(batch) - len(synced)
-                log(
-                    0,
-                    f"☁️ 云端账号池同步: 成功 {len(synced)}, "
-                    f"失败 {failed}, 待同步 {len(pending)}",
-                )
-                if failed:
-                    self.last_error = f"{failed} 个 Key 导入失败"
-                    break
-                self.last_error = ""
-            if pending and self.last_error:
-                log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-            return len(pending)
-
-    def close(self) -> None:
-        self.session.close()
 
 
 def load_rejected_domains() -> set[str]:
@@ -1229,39 +1028,30 @@ def process_one_account(
     return None
 
 
-def save_result(result: dict, cloud_sync: CloudAccountSync | None = None):
-    """将 API Key 持久化到本地，并按需立即同步云端账号池。"""
-    keys = result.get("api_keys", [])
-    default_key = result.get("default_key")
-    all_keys = list(keys)
-    if default_key and default_key not in all_keys:
-        all_keys.append(default_key)
-    values = list(
-        dict.fromkeys(
-            value
-            for key in all_keys
-            if (value := extract_api_key_value(key))
-        )
-    )
-
+def save_result(result: dict):
+    """线程安全地将 API Key 追加到 get_apikey.txt（一行一个）"""
     with FILE_LOCK:
-        if cloud_sync and values:
-            cloud_sync.enqueue(values)
-        with open(OUTPUT_FILE, "a", encoding="utf-8") as output:
-            output.writelines(f"{value}\n" for value in values)
-            output.flush()
-            os.fsync(output.fileno())
+        with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+            keys = result.get("api_keys", [])
+            dk = result.get("default_key")
+            all_keys = list(keys)
+            if dk and dk not in all_keys:
+                all_keys.append(dk)
 
-    log(result["thread_id"], f"💾 已写入 {OUTPUT_FILE.name} ({len(values)} 个 key)")
-    if cloud_sync and values:
-        cloud_sync.flush_pending()
+            written = 0
+            for k in all_keys:
+                val = extract_api_key_value(k)
+                if val:
+                    f.write(f"{val}\n")
+                    written += 1
+
+    log(result["thread_id"], f"💾 已写入 {OUTPUT_FILE.name} ({written} 个 key)")
 
 
 def run_concurrent_accounts(
     target_count: int,
     workers: int,
     worker: Callable[[int, float], dict | None],
-    saver: Callable[[dict], None] | None = None,
 ) -> tuple[int, int]:
     """维持滚动并发，失败任务自动补位直到达到成功目标。"""
     success = 0
@@ -1270,7 +1060,6 @@ def run_concurrent_accounts(
     next_task_id = 1
     pool = ThreadPoolExecutor(max_workers=workers)
     future_map = {}
-    save = saver or save_result
 
     def fill_slots() -> None:
         nonlocal next_task_id
@@ -1294,7 +1083,7 @@ def run_concurrent_accounts(
                     log(task_id, f"❌ 线程崩溃: {error}")
                     result = None
                 if result:
-                    save(result)
+                    save_result(result)
                     success += 1
                 else:
                     failed += 1
@@ -1366,14 +1155,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                         help="无 Retry-After 时的 HTTP 429 全局冷却秒数（默认: 3600）")
     parser.add_argument("--network-cooldown", type=float, default=-1,
                         help="全部代理平台不可用时的全局冷却秒数（默认: 60）")
-    parser.add_argument("--cloud-sync", action="store_true",
-                        help="将新注册的 API Key 同步到 todo2api 云端账号池")
-    parser.add_argument("--cloud-sync-url", type=str, default="",
-                        help="todo2api 云端项目访问地址")
-    parser.add_argument("--cloud-sync-username", type=str, default="",
-                        help="todo2api 云端管理员账号")
-    parser.add_argument("--cloud-sync-timeout", type=int, default=0,
-                        help="云端同步请求超时秒数（默认: 15）")
     parser.add_argument("--check-mail-provider", action="store_true",
                         help="检查当前临时邮箱渠道并退出")
     parser.add_argument("--list-domains", action="store_true",
@@ -1387,23 +1168,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     # ── 解析域名配置 ──
     cfg = load_config(config_path)
-    cloud_cfg = cfg.get("cloud_sync") if isinstance(cfg.get("cloud_sync"), dict) else {}
-    cloud_sync_enabled = args.cloud_sync or bool(cloud_cfg.get("enabled", False))
-    cloud_sync_url = (
-        args.cloud_sync_url
-        or os.environ.get("TODO2API_CLOUD_URL", "")
-        or cloud_cfg.get("base_url", "")
-    )
-    cloud_sync_username = (
-        args.cloud_sync_username
-        or os.environ.get("TODO2API_CLOUD_ADMIN_USERNAME", "")
-        or cloud_cfg.get("admin_username", "")
-    )
-    cloud_sync_password = (
-        os.environ.get(CLOUD_SYNC_PASSWORD_ENV, "")
-        or cloud_cfg.get("admin_password", "")
-    )
-    cloud_sync_timeout = args.cloud_sync_timeout or int(cloud_cfg.get("timeout_seconds") or 15)
     domain = args.domain or cfg.get("domain", "")
     exclude_domains: list[str] = cfg.get("exclude_domains", [])
     if not isinstance(exclude_domains, list):
@@ -1536,22 +1300,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     # ── 准备 ──
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    cloud_sync = None
-    if cloud_sync_enabled:
-        try:
-            cloud_sync = CloudAccountSync(
-                str(cloud_sync_url),
-                str(cloud_sync_username),
-                str(cloud_sync_password),
-                timeout=cloud_sync_timeout,
-            )
-            restored = cloud_sync.reconcile_output(OUTPUT_FILE)
-            if restored:
-                print(f"☁️ 已从云端同步队列恢复 {restored} 个本地 Key")
-            cloud_sync.flush_pending()
-        except (OSError, ValueError) as error:
-            print(f"❌ 云端同步配置错误: {error}")
-            sys.exit(1)
 
     print(f"{'=' * 55}")
     print(f"  Todofor.ai 批量注册机")
@@ -1564,7 +1312,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"  OTP 间隔  : {otp_interval:g}s")
     print(f"  429 冷却  : {otp_cooldown:g}s")
     print(f"  网络冷却 : {network_cooldown:g}s")
-    print(f"  云端同步 : {'已启用' if cloud_sync else '未启用'}")
     print(f"  成功目标 : {args.count}")
     print(f"  线程数   : {args.threads}")
     print(f"  重试次数 : {args.max_retries}")
@@ -1597,9 +1344,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             verbose=args.verbose,
         )
 
-    def persist_result(result: dict) -> None:
-        save_result(result, cloud_sync)
-
     if workers <= 1:
         attempted = 0
         while success < args.count:
@@ -1608,7 +1352,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             print(f"  成功进度 [{success}/{args.count}]  尝试 {attempted}")
             result = registration_worker(attempted)
             if result:
-                persist_result(result)
+                save_result(result)
                 success += 1
             else:
                 failed += 1
@@ -1620,7 +1364,6 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             args.count,
             workers,
             registration_worker,
-            persist_result,
         )
 
     # ── 汇总 ──
@@ -1630,14 +1373,9 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"  耗时   : {elapsed:.1f}s")
     print(f"  成功   : {success}")
     print(f"  失败重试: {failed}")
-    pending_cloud = 0
-    if cloud_sync:
-        pending_cloud = cloud_sync.flush_pending()
-        print(f"  云端待同步: {pending_cloud}")
-        cloud_sync.close()
     print(f"  结果   : {OUTPUT_FILE}")
     print(f"{'=' * 55}")
-    return 0 if success == args.count and pending_cloud == 0 else 1
+    return 0 if success == args.count else 1
 
 
 if __name__ == "__main__":

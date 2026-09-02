@@ -6,7 +6,10 @@
     "request_timeout": 30,
     "poll_interval_seconds": 5,
     "ttl_seconds": 900,
-    "provider": ""
+    "provider": "auto",
+    "providers": [
+      "tempmail_lol"
+    ]
   },
   "yyds": {
     "api_key": "AC-xxx"
@@ -14,7 +17,27 @@
   "domain": "",
   "exclude_domains": [],
   "proxy": {
-    "http": "",
-    "https": ""
+    "http": "http://us.{uuid}:proxy_token@127.0.0.1:9200",
+    "https": "http://us.{uuid}:proxy_token@127.0.0.1:9200"
+  },
+  "proxy_platforms": ["node", "jp", "us", "de", "github", "baokemeng"],
+  "otp_interval_seconds": 40,
+  "otp_cooldown_seconds": 3600,
+  "network_cooldown_seconds": 60,
+  "cloud_sync": {
+    "enabled": false,
+    "base_url": "https://todo2api.example.com",
+    "admin_username": "admin",
+    "admin_password": "change-me",
+    "timeout_seconds": 15
+  },
+  "turnstile": {
+    "enabled": true,
+    "mode": "always",
+    "site_key": "0x4AAAAAAEP6KBMVDx9FVTzd",
+    "browser_channel": "chrome",
+    "headless": false,
+    "timeout": 45,
+    "max_concurrency": 2
   }
 }

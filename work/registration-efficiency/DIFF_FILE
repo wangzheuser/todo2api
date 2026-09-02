@@ -1,0 +1,40 @@
+diff --git "a/D:\\projects\\github\\todo2api\\work\\registration-efficiency\\ORIGINAL_FILE" "b/D:\\projects\\github\\todo2api\\work\\registration-efficiency\\MODIFIED_FILE"
+index 4006990..f2e7445 100644
+--- "a/D:\\projects\\github\\todo2api\\work\\registration-efficiency\\ORIGINAL_FILE"
++++ "b/D:\\projects\\github\\todo2api\\work\\registration-efficiency\\MODIFIED_FILE"
+@@ -744,7 +744,8 @@ def process_one_account(
+                             log(
+                                 thread_id,
+                                 "   当前代理或浏览器不可用，换 UUID... "
+-                                f"({challenge_attempt}/{challenge_attempts})",
++                                f"({challenge_attempt}/{challenge_attempts}): "
++                                f"{str(error).splitlines()[0]}",
+                             )
+                 if challenge_error is not None:
+                     raise challenge_error
+@@ -822,13 +823,13 @@ def process_one_account(
+
+             try:
+                 api_keys = todo.get_api_keys()
+-                default_key = todo.get_default_api_key()
++                default_key = None if api_keys else todo.get_default_api_key()
+
+                 # 日志只保留结构信息，避免输出完整 API Key。
+                 log(thread_id, f"   apiKey.list → {len(api_keys)} 个")
+-                if default_key:
++                if not api_keys and default_key:
+                     log(thread_id, "   apiKey.getDefault → 已获取")
+-                else:
++                elif not api_keys:
+                     log(thread_id, "   apiKey.getDefault → null")
+
+                 # 如果 list 为空但 getDefault 有数据，使用 default
+@@ -1125,7 +1126,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默
+                     proxies=proxies,
+                     turnstile_solver=turnstile_solver,
+                     max_retries=args.max_retries,
+-                    initial_delay=((i - 1) % workers) * 1.5,
++                    initial_delay=(i - 1) * 1.5 if i <= workers else 0,
+                     verbose=args.verbose,
+                 ): i
+                 for i in range(1, args.count + 1)

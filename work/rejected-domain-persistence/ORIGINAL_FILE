@@ -24,16 +24,14 @@ Todofor.ai 批量注册机
 import os
 import sys
 import json
-import hashlib
 import time
 import threading
 import argparse
 import re
-import secrets
 import traceback
 import requests
 from pathlib import Path
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Callable
 from urllib.parse import unquote, urlparse
@@ -60,291 +58,10 @@ MAILPOOLHUB_REGISTRATION_PROVIDERS = (
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_FILE = SCRIPT_DIR / "config.json"
 OUTPUT_FILE = SCRIPT_DIR / "get_apikey.txt"
-REJECTED_DOMAINS_FILE = SCRIPT_DIR / "rejected_domains.txt"
-WORKING_MAIL_CHANNELS_FILE = SCRIPT_DIR / "working_mail_channels.json"
-CLOUD_SYNC_PASSWORD_ENV = "TODO2API_CLOUD_ADMIN_PASSWORD"
 
 # 线程安全锁
 FILE_LOCK = threading.Lock()
 PRINT_LOCK = threading.Lock()
-REJECTED_DOMAIN_LOCK = threading.Lock()
-
-
-class RequestIntervalGate:
-    """在线程间将目标请求按固定最小间隔排队。"""
-
-    def __init__(self, interval_seconds: float):
-        self.interval_seconds = max(0.0, float(interval_seconds))
-        self.next_allowed = 0.0
-        self.cooldown_until = 0.0
-        self.lock = threading.Lock()
-
-    def wait_for_cooldown(self) -> float:
-        started = time.monotonic()
-        while True:
-            with self.lock:
-                delay = self.cooldown_until - time.monotonic()
-            if delay <= 0:
-                return time.monotonic() - started
-            time.sleep(delay)
-
-    def wait(self) -> float:
-        started = time.monotonic()
-        while True:
-            with self.lock:
-                now = time.monotonic()
-                delay = max(self.next_allowed, self.cooldown_until) - now
-                if delay <= 0:
-                    self.next_allowed = now + self.interval_seconds
-                    return time.monotonic() - started
-            time.sleep(delay)
-
-    def defer(self, seconds: float) -> None:
-        with self.lock:
-            self.cooldown_until = max(
-                self.cooldown_until,
-                time.monotonic() + max(0.0, float(seconds)),
-            )
-
-
-class CloudAccountSync:
-    """通过 todo2api 管理会话持久同步新注册的 API Key。"""
-
-    def __init__(
-        self,
-        base_url: str,
-        username: str,
-        password: str,
-        *,
-        queue_dir: Path = SCRIPT_DIR,
-        timeout: int = 15,
-    ):
-        parsed = urlparse(str(base_url or "").strip())
-        host = (parsed.hostname or "").casefold()
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("云端项目地址必须是完整的 HTTP(S) URL")
-        if parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("公网云端同步必须使用 HTTPS")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("云端项目地址不能包含凭据、查询参数或片段")
-        if not str(username or "").strip() or not password:
-            raise ValueError("云端管理员账号和密码不能为空")
-
-        origin_host = parsed.netloc
-        self.origin = f"{parsed.scheme}://{origin_host}"
-        self.base_url = f"{self.origin}{parsed.path.rstrip('/')}"
-        self.username = str(username).strip()
-        self.password = str(password)
-        self.timeout = max(1, int(timeout))
-        target_hash = hashlib.sha256(self.base_url.encode("utf-8")).hexdigest()[:12]
-        self.queue_file = queue_dir / f"cloud_sync_pending.{target_hash}.json"
-        self.lock = threading.Lock()
-        self.session = requests.Session()
-        self.session.trust_env = False
-        self.auth_failed = False
-        self.last_error = ""
-        self.memory_pending: list[str] = []
-        self._load_pending()
-
-    def _load_pending(self) -> list[str]:
-        try:
-            body = json.loads(self.queue_file.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return []
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"读取云端同步队列失败: {error}") from error
-        if not isinstance(body, dict) or body.get("base_url") != self.base_url:
-            raise ValueError("云端同步队列目标与当前配置不一致")
-        values = body.get("keys")
-        if not isinstance(values, list):
-            raise ValueError("云端同步队列格式无效")
-        return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
-
-    def _write_pending(self, keys: list[str]) -> None:
-        temporary = self.queue_file.with_suffix(".tmp")
-        with open(temporary, "w", encoding="utf-8") as output:
-            json.dump({"base_url": self.base_url, "keys": keys}, output, ensure_ascii=False)
-            output.flush()
-            os.fsync(output.fileno())
-        temporary.replace(self.queue_file)
-
-    def enqueue(self, keys: list[str]) -> None:
-        with self.lock:
-            pending = self._load_pending()
-            added = [str(key).strip() for key in keys if str(key).strip()]
-            pending.extend(added)
-            try:
-                self._write_pending(list(dict.fromkeys(pending)))
-            except OSError as error:
-                self.memory_pending = list(dict.fromkeys(self.memory_pending + added))
-                self.last_error = f"写入待同步队列失败: {error}"
-
-    def reconcile_output(self, output_file: Path) -> int:
-        """把崩溃窗口中仅存在于队列的 Key 补回本地输出。"""
-        with self.lock:
-            pending = self._load_pending()
-        if not pending:
-            return 0
-        try:
-            existing = set(output_file.read_text(encoding="utf-8").splitlines())
-        except OSError:
-            existing = set()
-        missing = [key for key in pending if key not in existing]
-        if missing:
-            with open(output_file, "a", encoding="utf-8") as output:
-                output.writelines(f"{key}\n" for key in missing)
-                output.flush()
-                os.fsync(output.fileno())
-        return len(missing)
-
-    def pending_count(self) -> int:
-        with self.lock:
-            return len(set(self._load_pending()) | set(self.memory_pending))
-
-    def _login(self) -> bool:
-        if self.auth_failed:
-            return False
-        try:
-            response = self.session.post(
-                f"{self.base_url}/api/auth/login",
-                json={"username": self.username, "password": self.password},
-                headers={"Origin": self.origin},
-                timeout=self.timeout,
-            )
-        except requests.RequestException as error:
-            self.last_error = str(error).splitlines()[0]
-            return False
-        if response.status_code != 200:
-            self.last_error = f"管理员登录返回 HTTP {response.status_code}"
-            if response.status_code in {401, 403, 429}:
-                self.auth_failed = True
-            return False
-        self.last_error = ""
-        return True
-
-    def _post_keys(self, keys: list[str]) -> requests.Response | None:
-        try:
-            return self.session.post(
-                f"{self.base_url}/api/accounts/bulk",
-                json={"keys": keys},
-                headers={"Origin": self.origin},
-                timeout=self.timeout,
-            )
-        except requests.RequestException as error:
-            self.last_error = str(error).splitlines()[0]
-            return None
-
-    def flush_pending(self) -> int:
-        """同步当前目标的全部积压，返回剩余数量。"""
-        with self.lock:
-            pending = self._load_pending()
-            if self.memory_pending:
-                pending = list(dict.fromkeys(pending + self.memory_pending))
-                try:
-                    self._write_pending(pending)
-                except OSError as error:
-                    self.last_error = f"写入待同步队列失败: {error}"
-                    log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-                    return len(pending)
-                self.memory_pending = []
-            while pending and not self.auth_failed:
-                batch = pending[:1000]
-                if not self.session.cookies and not self._login():
-                    break
-                response = self._post_keys(batch)
-                if response is None:
-                    break
-                if response.status_code == 401:
-                    self.session.cookies.clear()
-                    if not self._login():
-                        break
-                    response = self._post_keys(batch)
-                    if response is None:
-                        break
-                if response.status_code != 200:
-                    self.last_error = f"账号导入返回 HTTP {response.status_code}"
-                    if response.status_code in {401, 403}:
-                        self.auth_failed = True
-                    break
-                try:
-                    body = response.json()
-                    results = body["results"]
-                except (ValueError, KeyError, TypeError):
-                    self.last_error = "账号导入响应格式无效"
-                    break
-                if not isinstance(results, list) or len(results) != len(batch):
-                    self.last_error = "账号导入响应数量不匹配"
-                    break
-                synced = {
-                    key
-                    for key, item in zip(batch, results)
-                    if isinstance(item, dict) and item.get("status") in {"created", "duplicate"}
-                }
-                pending = [key for key in pending if key not in synced]
-                try:
-                    self._write_pending(pending)
-                except OSError as error:
-                    self.last_error = f"更新待同步队列失败: {error}"
-                    pending = self._load_pending()
-                    log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-                    return len(pending)
-                failed = len(batch) - len(synced)
-                log(
-                    0,
-                    f"☁️ 云端账号池同步: 成功 {len(synced)}, "
-                    f"失败 {failed}, 待同步 {len(pending)}",
-                )
-                if failed:
-                    self.last_error = f"{failed} 个 Key 导入失败"
-                    break
-                self.last_error = ""
-            if pending and self.last_error:
-                log(0, f"⚠️ 云端同步暂未完成: {self.last_error}; 待同步 {len(pending)}")
-            return len(pending)
-
-    def close(self) -> None:
-        self.session.close()
-
-
-def load_rejected_domains() -> set[str]:
-    """读取目标业务已明确拒绝的邮箱域名。"""
-    try:
-        return {
-            line.strip().casefold()
-            for line in REJECTED_DOMAINS_FILE.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        }
-    except OSError:
-        return set()
-
-
-def record_rejected_domain(domain: str) -> bool:
-    """将明确拒绝的域名去重追加到持久黑名单。"""
-    normalized = str(domain or "").strip().casefold()
-    if not normalized:
-        return False
-    with REJECTED_DOMAIN_LOCK:
-        if normalized in load_rejected_domains():
-            return False
-        with open(REJECTED_DOMAINS_FILE, "a", encoding="utf-8") as output:
-            output.write(f"{normalized}\n")
-    return True
-
-
-def load_working_mail_channels() -> list[dict]:
-    """读取完成实测并至少成功一次的 MailPoolHub 渠道。"""
-    try:
-        body = json.loads(WORKING_MAIL_CHANNELS_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    channels = body.get("channels") if isinstance(body, dict) else None
-    if not isinstance(channels, list):
-        return []
-    return [
-        channel
-        for channel in channels
-        if isinstance(channel, dict) and str(channel.get("provider") or "").strip()
-    ]
 
 
 def normalize_proxy_url(proxy_url: str) -> str:
@@ -375,26 +92,15 @@ def normalize_proxy_url(proxy_url: str) -> str:
     )
 
 
-def resolve_proxy_templates(
-    proxies: dict | None,
-    platform: str = "",
-) -> dict | None:
+def resolve_proxy_templates(proxies: dict | None) -> dict | None:
     """为单次注册解析共享的 Resin 粘性会话 UUID。"""
     if not proxies:
         return None
     session_id = uuid4().hex
-    resolved = {}
-    for key, value in proxies.items():
-        normalized = normalize_proxy_url(value)
-        if platform:
-            normalized = re.sub(
-                r"(?<=://)[^.@:/]+(?=\.)",
-                platform,
-                normalized,
-                count=1,
-            )
-        resolved[key] = normalized.replace("{uuid}", session_id)
-    return resolved
+    return {
+        key: normalize_proxy_url(value).replace("{uuid}", session_id)
+        for key, value in proxies.items()
+    }
 
 
 def solve_turnstile(
@@ -579,18 +285,10 @@ def create_mail_provider_factory(
         forced_provider_name = str(mailpoolhub_provider_name or mailpoolhub_cfg.get("provider") or "")
         configured_provider_names = mailpoolhub_cfg.get("providers")
         if not isinstance(configured_provider_names, list):
-            tested_names = [
-                str(channel["provider"]).strip()
-                for channel in load_working_mail_channels()
-            ]
-            configured_provider_names = tested_names or list(MAILPOOLHUB_REGISTRATION_PROVIDERS)
-        mode = forced_provider_name.lower()
-        random_mode = mode in {"", "auto", "random"}
-        provider_names = (
-            list(configured_provider_names)
-            if random_mode
-            else [forced_provider_name]
-        )
+            configured_provider_names = list(MAILPOOLHUB_REGISTRATION_PROVIDERS)
+        provider_names = list(configured_provider_names)
+        if forced_provider_name and forced_provider_name.lower() != "auto":
+            provider_names.insert(0, forced_provider_name)
 
         def create_mailpoolhub_provider() -> TemporaryMailProvider:
             """为单个注册任务创建独立 MailPoolHub Session。"""
@@ -602,12 +300,6 @@ def create_mail_provider_factory(
                 ttl_seconds=ttl_seconds,
                 provider_name=forced_provider_name,
                 provider_names=provider_names,
-                provider_start=(
-                    secrets.randbelow(len(provider_names))
-                    if random_mode and provider_names
-                    else 0
-                ),
-                allow_provider_fallback=False,
             )
 
         return create_mailpoolhub_provider, f"MailPoolHub ({str(base_url).rstrip('/')})"
@@ -660,8 +352,6 @@ class TodoforAI:
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
-        self.last_otp_retry_after = 0.0
-        self.last_otp_rate_limit_headers: dict[str, str] = {}
         self.proxy_url = str((proxies or {}).get("https") or (proxies or {}).get("http") or "")
         if proxies:
             self.session.proxies.update(proxies)
@@ -706,8 +396,6 @@ class TodoforAI:
         self.last_otp_error_code = ""
         self.last_otp_error_message = ""
         self.last_otp_status = 0
-        self.last_otp_retry_after = 0.0
-        self.last_otp_rate_limit_headers = {}
         headers = {**self._api_headers(), "Content-Type": "application/json"}
         if captcha_token:
             headers["x-captcha-response"] = captcha_token
@@ -718,14 +406,6 @@ class TodoforAI:
             timeout=30,
         )
         self.last_otp_status = resp.status_code
-        self.last_otp_rate_limit_headers = {
-            key: value
-            for key, value in resp.headers.items()
-            if key.casefold() in {"retry-after", "x-ratelimit-reset", "ratelimit-reset"}
-        }
-        retry_after = resp.headers.get("Retry-After", "").strip()
-        if retry_after.isdigit():
-            self.last_otp_retry_after = float(retry_after)
         try:
             body = resp.json()
         except json.JSONDecodeError:
@@ -910,13 +590,7 @@ def process_one_account(
     domain: str = "",
     exclude_domains: list[str] | None = None,
     proxies: dict | None = None,
-    proxy_platforms: list[str] | None = None,
     turnstile_solver: Callable[[str], str] | None = None,
-    turnstile_mode: str = "auto",
-    otp_gate: RequestIntervalGate | None = None,
-    otp_cooldown_seconds: float = 3600,
-    network_gate: RequestIntervalGate | None = None,
-    network_cooldown_seconds: float = 60,
     max_retries: int = 5,
     proxy_attempts: int = 5,
     initial_delay: float = 0,
@@ -936,29 +610,21 @@ def process_one_account(
     if initial_delay > 0:
         time.sleep(initial_delay)
     failed_domains: list[str] = []
-    platforms = [str(value).strip() for value in (proxy_platforms or []) if str(value).strip()]
-    proxy_cursor = max(0, thread_id - 1)
-
-    def next_proxies() -> dict | None:
-        nonlocal proxy_cursor
-        platform = platforms[proxy_cursor % len(platforms)] if platforms else ""
-        proxy_cursor += 1
-        return resolve_proxy_templates(proxies, platform)
 
     for attempt in range(1, max_retries + 1):
         account: dict | None = None
         todo: TodoforAI | None = None
+        captcha_token = ""
         try:
-            if otp_gate:
-                otp_gate.wait_for_cooldown()
-            if network_gate:
-                network_gate.wait_for_cooldown()
             last_session_error: Exception | None = None
             for proxy_attempt in range(1, max(1, proxy_attempts if proxies else 1) + 1):
-                candidate = TodoforAI(proxies=next_proxies())
+                candidate = TodoforAI(proxies=resolve_proxy_templates(proxies))
                 try:
                     if not candidate.init_anonymous_session():
                         raise requests.RequestException("匿名会话初始化失败")
+                    if turnstile_solver:
+                        log(thread_id, "🧩 获取浏览器验证令牌...")
+                        captcha_token = turnstile_solver(candidate.proxy_url)
                     todo = candidate
                     break
                 except Exception as error:
@@ -969,18 +635,10 @@ def process_one_account(
                     if proxy_attempt < proxy_attempts:
                         log(thread_id, f"   当前代理或浏览器不可用，换 UUID... ({proxy_attempt}/{proxy_attempts})")
             if todo is None:
-                if network_gate:
-                    network_gate.defer(network_cooldown_seconds)
-                    log(
-                        thread_id,
-                        f"   全部代理平台不可用，全局冷却 {network_cooldown_seconds:g}s...",
-                    )
                 raise last_session_error or requests.RequestException("匿名会话初始化失败")
 
             # ── 1. 创建临时邮箱 ──
-            current_exclude = sorted(
-                set(exclude_domains or []) | set(failed_domains) | load_rejected_domains()
-            )
+            current_exclude = (exclude_domains or []) + failed_domains
             log(thread_id, f"📧 创建临时邮箱... (尝试 {attempt}/{max_retries})")
             account = mail_provider.create_account(
                 domain=domain,
@@ -994,71 +652,11 @@ def process_one_account(
 
             # ── 2. 发送验证码 ──
             log(thread_id, "📤 发送 OTP...")
-            solve_first = turnstile_mode == "always" and turnstile_solver is not None
-            if not solve_first and otp_gate:
-                if otp_gate.wait() > 60:
-                    raise RuntimeError("OTP 冷却结束，重新创建邮箱以避免会话过期")
-            otp_sent = False if solve_first else todo.send_otp(email)
-            needs_browser = solve_first or (
-                not otp_sent
-                and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED"
-                and turnstile_solver is not None
-            )
-            if needs_browser:
-                challenge_error: Exception | None = None
-                challenge_attempts = max(1, proxy_attempts if proxies else 1)
-                for challenge_attempt in range(1, challenge_attempts + 1):
-                    candidate = todo if challenge_attempt == 1 else TodoforAI(
-                        proxies=next_proxies()
-                    )
-                    try:
-                        if challenge_attempt > 1 and not candidate.init_anonymous_session():
-                            raise requests.RequestException("匿名会话初始化失败")
-                        log(
-                            thread_id,
-                            "🧩 获取浏览器验证令牌..."
-                            if solve_first
-                            else "🧩 目标要求浏览器验证，获取令牌后重试...",
-                        )
-                        if otp_gate and otp_gate.wait_for_cooldown() > 60:
-                            challenge_error = RuntimeError(
-                                "全局冷却结束，重新创建邮箱以避免会话过期"
-                            )
-                            break
-                        captcha_token = turnstile_solver(candidate.proxy_url)
-                        if otp_gate:
-                            if otp_gate.wait() > 60:
-                                challenge_error = RuntimeError(
-                                    "OTP 冷却结束，重新创建邮箱和浏览器令牌"
-                                )
-                                break
-                        otp_sent = candidate.send_otp(email, captcha_token)
-                        if (
-                            not otp_sent
-                            and getattr(candidate, "last_otp_error_code", "")
-                            == "CAPTCHA_REQUIRED"
-                        ):
-                            raise RuntimeError(
-                                getattr(candidate, "last_otp_error_message", "")
-                                or "浏览器令牌未通过"
-                            )
-                        todo = candidate
-                        challenge_error = None
-                        break
-                    except Exception as error:
-                        challenge_error = error
-                        session = getattr(candidate, "session", None)
-                        if session is not None:
-                            session.close()
-                        if challenge_attempt < challenge_attempts:
-                            log(
-                                thread_id,
-                                "   当前代理或浏览器不可用，换 UUID... "
-                                f"({challenge_attempt}/{challenge_attempts}): "
-                                f"{str(error).splitlines()[0]}",
-                            )
-                if challenge_error is not None:
-                    raise challenge_error
+            otp_sent = todo.send_otp(email, captcha_token)
+            if not otp_sent and getattr(todo, "last_otp_error_code", "") == "CAPTCHA_REQUIRED" and turnstile_solver:
+                log(thread_id, "🧩 浏览器令牌已过期，重新获取...")
+                captcha_token = turnstile_solver(todo.proxy_url)
+                otp_sent = todo.send_otp(email, captcha_token)
 
             if not otp_sent:
                 error_code = str(getattr(todo, "last_otp_error_code", "") or "UNKNOWN")
@@ -1071,38 +669,9 @@ def process_one_account(
 
                 # 浏览器校验和临时邮箱策略不会因更换域名或会话而消失。
                 normalized_message = error_message.casefold()
-                if "temporary email" in normalized_message:
-                    if record_rejected_domain(used_domain):
-                        log(thread_id, f"   已记录拒绝域名: {used_domain}")
-                    failed_domains.append(used_domain)
-                    if attempt < max_retries:
-                        log(thread_id, "   自动排除该域名并重试...")
-                        time.sleep(min(2 ** (attempt - 1), 10))
-                        continue
-                    return None
-
-                if getattr(todo, "last_otp_status", 0) == 429:
-                    cooldown_seconds = max(
-                        otp_cooldown_seconds,
-                        float(getattr(todo, "last_otp_retry_after", 0) or 0),
-                    )
-                    if otp_gate:
-                        otp_gate.defer(cooldown_seconds)
-                    if attempt < max_retries:
-                        if cooldown_seconds > 0:
-                            log(
-                                thread_id,
-                                f"   目标接口限速，全局冷却 {cooldown_seconds:g}s 后重试"
-                                f"；响应头: {getattr(todo, 'last_otp_rate_limit_headers', {})}",
-                            )
-                        else:
-                            log(thread_id, "   当前出口限速，更换邮箱、UUID 和平台后重试...")
-                        continue
-                    return None
-
                 non_retryable = error_code in {"CAPTCHA_REQUIRED"} or any(
                     text in normalized_message
-                    for text in ("browser verification", "captcha")
+                    for text in ("temporary email", "browser verification", "captcha")
                 )
                 if non_retryable:
                     if error_code == "CAPTCHA_REQUIRED" and turnstile_solver and attempt < max_retries:
@@ -1144,25 +713,21 @@ def process_one_account(
             user = login_result["user"]
             log(thread_id, f"✅ 登录成功! user_id={user.get('id')}  isAnonymous={user.get('isAnonymous')}")
 
+            # 短暂等待
+            time.sleep(1)
+
             # ── 6. 获取 API Key ──
             log(thread_id, "🔑 获取 API Key...")
 
             try:
-                api_keys = []
-                default_key = None
-                for key_attempt in range(1, 4):
-                    api_keys = todo.get_api_keys()
-                    default_key = None if api_keys else todo.get_default_api_key()
-                    if api_keys or default_key:
-                        break
-                    if key_attempt < 3:
-                        time.sleep(1)
+                api_keys = todo.get_api_keys()
+                default_key = todo.get_default_api_key()
 
                 # 日志只保留结构信息，避免输出完整 API Key。
                 log(thread_id, f"   apiKey.list → {len(api_keys)} 个")
-                if not api_keys and default_key:
+                if default_key:
                     log(thread_id, "   apiKey.getDefault → 已获取")
-                elif not api_keys:
+                else:
                     log(thread_id, "   apiKey.getDefault → null")
 
                 # 如果 list 为空但 getDefault 有数据，使用 default
@@ -1229,88 +794,24 @@ def process_one_account(
     return None
 
 
-def save_result(result: dict, cloud_sync: CloudAccountSync | None = None):
-    """将 API Key 持久化到本地，并按需立即同步云端账号池。"""
-    keys = result.get("api_keys", [])
-    default_key = result.get("default_key")
-    all_keys = list(keys)
-    if default_key and default_key not in all_keys:
-        all_keys.append(default_key)
-    values = list(
-        dict.fromkeys(
-            value
-            for key in all_keys
-            if (value := extract_api_key_value(key))
-        )
-    )
-
+def save_result(result: dict):
+    """线程安全地将 API Key 追加到 get_apikey.txt（一行一个）"""
     with FILE_LOCK:
-        if cloud_sync and values:
-            cloud_sync.enqueue(values)
-        with open(OUTPUT_FILE, "a", encoding="utf-8") as output:
-            output.writelines(f"{value}\n" for value in values)
-            output.flush()
-            os.fsync(output.fileno())
+        with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+            keys = result.get("api_keys", [])
+            dk = result.get("default_key")
+            all_keys = list(keys)
+            if dk and dk not in all_keys:
+                all_keys.append(dk)
 
-    log(result["thread_id"], f"💾 已写入 {OUTPUT_FILE.name} ({len(values)} 个 key)")
-    if cloud_sync and values:
-        cloud_sync.flush_pending()
+            written = 0
+            for k in all_keys:
+                val = extract_api_key_value(k)
+                if val:
+                    f.write(f"{val}\n")
+                    written += 1
 
-
-def run_concurrent_accounts(
-    target_count: int,
-    workers: int,
-    worker: Callable[[int, float], dict | None],
-    saver: Callable[[dict], None] | None = None,
-) -> tuple[int, int]:
-    """维持滚动并发，失败任务自动补位直到达到成功目标。"""
-    success = 0
-    failed = 0
-    attempted = 0
-    next_task_id = 1
-    pool = ThreadPoolExecutor(max_workers=workers)
-    future_map = {}
-    save = saver or save_result
-
-    def fill_slots() -> None:
-        nonlocal next_task_id
-        slots = min(workers, target_count - success) - len(future_map)
-        for _ in range(max(0, slots)):
-            task_id = next_task_id
-            next_task_id += 1
-            initial_delay = (task_id - 1) * 1.5 if task_id <= workers else 0
-            future_map[pool.submit(worker, task_id, initial_delay)] = task_id
-
-    fill_slots()
-    try:
-        while future_map:
-            completed, _ = wait(future_map, return_when=FIRST_COMPLETED)
-            for future in completed:
-                attempted += 1
-                task_id = future_map.pop(future)
-                try:
-                    result = future.result()
-                except Exception as error:
-                    log(task_id, f"❌ 线程崩溃: {error}")
-                    result = None
-                if result:
-                    save(result)
-                    success += 1
-                else:
-                    failed += 1
-                print(
-                    f"    成功进度: {success}/{target_count}  "
-                    f"尝试: {attempted}  失败重试: {failed}"
-                )
-            fill_slots()
-    except KeyboardInterrupt:
-        for future in future_map:
-            future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    else:
-        pool.shutdown(wait=True)
-    return success, failed
+    log(result["thread_id"], f"💾 已写入 {OUTPUT_FILE.name} ({written} 个 key)")
 
 
 # ============================================================
@@ -1333,7 +834,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
         """,
     )
     parser.add_argument("-n", "--count", type=int, default=1,
-                        help="成功注册目标数量（默认: 1）")
+                        help="注册数量（默认: 1）")
     parser.add_argument("-t", "--threads", type=int, default=1,
                         help="并发线程数（默认: 1）")
     parser.add_argument("-k", "--api-key", type=str, default="",
@@ -1352,28 +853,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
                         help="固定 MailPoolHub 下游渠道（推荐: mailgw）")
     parser.add_argument("--proxy-url", type=str, default="",
                         help="目标业务代理 URL，支持 {uuid} Resin 粘性会话模板")
-    parser.add_argument("--proxy-platforms", type=str, default="",
-                        help="逗号分隔的 Resin 平台轮换列表")
     parser.add_argument("--max-retries", type=int, default=5,
                         help="每个账号最大尝试次数（默认: 5）")
     parser.add_argument("--turnstile-concurrency", type=int, default=0,
                         help="浏览器验证并发数（默认: min(线程数, 2)）")
-    parser.add_argument("--turnstile-mode", choices=("always", "auto", "off"), default="",
-                        help="浏览器验证模式（默认: always）")
-    parser.add_argument("--otp-interval", type=float, default=-1,
-                        help="OTP 提交最小间隔秒数（默认: 40）")
-    parser.add_argument("--otp-cooldown", type=float, default=-1,
-                        help="无 Retry-After 时的 HTTP 429 全局冷却秒数（默认: 3600）")
-    parser.add_argument("--network-cooldown", type=float, default=-1,
-                        help="全部代理平台不可用时的全局冷却秒数（默认: 60）")
-    parser.add_argument("--cloud-sync", action="store_true",
-                        help="将新注册的 API Key 同步到 todo2api 云端账号池")
-    parser.add_argument("--cloud-sync-url", type=str, default="",
-                        help="todo2api 云端项目访问地址")
-    parser.add_argument("--cloud-sync-username", type=str, default="",
-                        help="todo2api 云端管理员账号")
-    parser.add_argument("--cloud-sync-timeout", type=int, default=0,
-                        help="云端同步请求超时秒数（默认: 15）")
     parser.add_argument("--check-mail-provider", action="store_true",
                         help="检查当前临时邮箱渠道并退出")
     parser.add_argument("--list-domains", action="store_true",
@@ -1387,28 +870,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     # ── 解析域名配置 ──
     cfg = load_config(config_path)
-    cloud_cfg = cfg.get("cloud_sync") if isinstance(cfg.get("cloud_sync"), dict) else {}
-    cloud_sync_enabled = args.cloud_sync or bool(cloud_cfg.get("enabled", False))
-    cloud_sync_url = (
-        args.cloud_sync_url
-        or os.environ.get("TODO2API_CLOUD_URL", "")
-        or cloud_cfg.get("base_url", "")
-    )
-    cloud_sync_username = (
-        args.cloud_sync_username
-        or os.environ.get("TODO2API_CLOUD_ADMIN_USERNAME", "")
-        or cloud_cfg.get("admin_username", "")
-    )
-    cloud_sync_password = (
-        os.environ.get(CLOUD_SYNC_PASSWORD_ENV, "")
-        or cloud_cfg.get("admin_password", "")
-    )
-    cloud_sync_timeout = args.cloud_sync_timeout or int(cloud_cfg.get("timeout_seconds") or 15)
     domain = args.domain or cfg.get("domain", "")
     exclude_domains: list[str] = cfg.get("exclude_domains", [])
     if not isinstance(exclude_domains, list):
         exclude_domains = []
-    exclude_domains = sorted(set(exclude_domains) | load_rejected_domains())
 
     # ── 解析代理配置 ──
     proxy_cfg = cfg.get("proxy", {})
@@ -1424,44 +889,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
         except ValueError as error:
             print(f"❌ 代理配置错误：{error}")
             sys.exit(1)
-    configured_platforms = args.proxy_platforms or cfg.get("proxy_platforms") or ""
-    if isinstance(configured_platforms, str):
-        configured_platforms = configured_platforms.split(",")
-    elif not isinstance(configured_platforms, list):
-        configured_platforms = []
-    proxy_platforms = [
-        str(value).strip()
-        for value in configured_platforms
-        if str(value).strip()
-    ]
 
     turnstile_cfg = cfg.get("turnstile") if isinstance(cfg.get("turnstile"), dict) else {}
-    turnstile_mode = str(
-        args.turnstile_mode or turnstile_cfg.get("mode") or "always"
-    ).strip().lower()
-    if not turnstile_cfg.get("enabled", True):
-        turnstile_mode = "off"
-    if turnstile_mode not in {"always", "auto", "off"}:
-        parser.error("turnstile.mode 必须是 always、auto 或 off")
-    otp_interval = (
-        args.otp_interval
-        if args.otp_interval >= 0
-        else float(cfg.get("otp_interval_seconds", 40))
-    )
-    otp_cooldown = (
-        args.otp_cooldown
-        if args.otp_cooldown >= 0
-        else float(cfg.get("otp_cooldown_seconds", 3600))
-    )
-    otp_gate = RequestIntervalGate(otp_interval) if otp_interval > 0 else None
-    network_cooldown = (
-        args.network_cooldown
-        if args.network_cooldown >= 0
-        else float(cfg.get("network_cooldown_seconds", 60))
-    )
-    network_gate = RequestIntervalGate(0)
     turnstile_solver = None
-    if turnstile_mode != "off":
+    if turnstile_cfg.get("enabled", True):
         turnstile_concurrency = args.turnstile_concurrency or int(
             turnstile_cfg.get("max_concurrency") or min(args.threads, 2)
         )
@@ -1536,36 +967,13 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     # ── 准备 ──
     SCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    cloud_sync = None
-    if cloud_sync_enabled:
-        try:
-            cloud_sync = CloudAccountSync(
-                str(cloud_sync_url),
-                str(cloud_sync_username),
-                str(cloud_sync_password),
-                timeout=cloud_sync_timeout,
-            )
-            restored = cloud_sync.reconcile_output(OUTPUT_FILE)
-            if restored:
-                print(f"☁️ 已从云端同步队列恢复 {restored} 个本地 Key")
-            cloud_sync.flush_pending()
-        except (OSError, ValueError) as error:
-            print(f"❌ 云端同步配置错误: {error}")
-            sys.exit(1)
 
     print(f"{'=' * 55}")
     print(f"  Todofor.ai 批量注册机")
     print(f"{'=' * 55}")
     print(f"  邮箱渠道 : {provider_label}")
     print(f"  代理     : {'已配置' if proxies else '无（直连）'}")
-    if proxy_platforms:
-        print(f"  平台轮换 : {', '.join(proxy_platforms)}")
-    print(f"  浏览器模式: {turnstile_mode}")
-    print(f"  OTP 间隔  : {otp_interval:g}s")
-    print(f"  429 冷却  : {otp_cooldown:g}s")
-    print(f"  网络冷却 : {network_cooldown:g}s")
-    print(f"  云端同步 : {'已启用' if cloud_sync else '未启用'}")
-    print(f"  成功目标 : {args.count}")
+    print(f"  注册数量 : {args.count}")
     print(f"  线程数   : {args.threads}")
     print(f"  重试次数 : {args.max_retries}")
     print(f"  输出文件 : {OUTPUT_FILE}")
@@ -1578,50 +986,73 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     workers = min(args.threads, args.count)
 
-    def registration_worker(task_id: int, initial_delay: float = 0) -> dict | None:
-        return process_one_account(
-            task_id,
-            mail_provider_factory,
-            domain=domain,
-            exclude_domains=exclude_domains,
-            proxies=proxies,
-            proxy_platforms=proxy_platforms,
-            turnstile_solver=turnstile_solver,
-            turnstile_mode=turnstile_mode,
-            otp_gate=otp_gate,
-            otp_cooldown_seconds=otp_cooldown,
-            network_gate=network_gate,
-            network_cooldown_seconds=network_cooldown,
-            max_retries=args.max_retries,
-            initial_delay=initial_delay,
-            verbose=args.verbose,
-        )
-
-    def persist_result(result: dict) -> None:
-        save_result(result, cloud_sync)
-
     if workers <= 1:
-        attempted = 0
-        while success < args.count:
-            attempted += 1
+        # 单线程
+        for i in range(1, args.count + 1):
             print(f"\n{'─' * 45}")
-            print(f"  成功进度 [{success}/{args.count}]  尝试 {attempted}")
-            result = registration_worker(attempted)
+            print(f"  [{i}/{args.count}]")
+            result = process_one_account(
+                i,
+                mail_provider_factory,
+                domain=domain,
+                exclude_domains=exclude_domains,
+                proxies=proxies,
+                turnstile_solver=turnstile_solver,
+                max_retries=args.max_retries,
+                verbose=args.verbose,
+            )
             if result:
-                persist_result(result)
+                save_result(result)
                 success += 1
             else:
                 failed += 1
-            if success < args.count:
+            if i < args.count:
                 time.sleep(2)
     else:
+        # 多线程
         print(f"  启动 {workers} 个线程...\n")
-        success, failed = run_concurrent_accounts(
-            args.count,
-            workers,
-            registration_worker,
-            persist_result,
-        )
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            future_map = {
+                pool.submit(
+                    process_one_account,
+                    i,
+                    mail_provider_factory,
+                    domain=domain,
+                    exclude_domains=exclude_domains,
+                    proxies=proxies,
+                    turnstile_solver=turnstile_solver,
+                    max_retries=args.max_retries,
+                    initial_delay=((i - 1) % workers) * 1.5,
+                    verbose=args.verbose,
+                ): i
+                for i in range(1, args.count + 1)
+            }
+
+            done = 0
+            for future in as_completed(future_map):
+                done += 1
+                tid = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    log(tid, f"❌ 线程崩溃: {e}")
+                    result = None
+
+                if result:
+                    save_result(result)
+                    success += 1
+                else:
+                    failed += 1
+
+                print(f"    总进度: {done}/{args.count}  成功: {success}  失败: {failed}")
+        except KeyboardInterrupt:
+            for future in future_map:
+                future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            pool.shutdown(wait=True)
 
     # ── 汇总 ──
     elapsed = time.time() - start_time
@@ -1629,15 +1060,10 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
     print(f"  执行完成")
     print(f"  耗时   : {elapsed:.1f}s")
     print(f"  成功   : {success}")
-    print(f"  失败重试: {failed}")
-    pending_cloud = 0
-    if cloud_sync:
-        pending_cloud = cloud_sync.flush_pending()
-        print(f"  云端待同步: {pending_cloud}")
-        cloud_sync.close()
+    print(f"  失败   : {failed}")
     print(f"  结果   : {OUTPUT_FILE}")
     print(f"{'=' * 55}")
-    return 0 if success == args.count and pending_cloud == 0 else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

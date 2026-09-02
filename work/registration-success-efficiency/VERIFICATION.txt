@@ -1,0 +1,36 @@
+CHANGED_BRANCH: dev
+CHANGED_FIELD: successful-key target scheduling, always-on Turnstile mode, Resin platform rotation, OTP/network circuit breakers, API-key polling, and 16 MiB rotating registration log
+
+ARTIFACTS:
+MODIFIED_FILE: D:/projects/github/todo2api/work/registration-success-efficiency/MODIFIED_FILE
+DIFF_FILE: D:/projects/github/todo2api/work/registration-success-efficiency/DIFF_FILE
+VERIFICATION.txt: D:/projects/github/todo2api/work/registration-success-efficiency/VERIFICATION.txt
+ROLLBACK.sh: D:/projects/github/todo2api/work/registration-success-efficiency/ROLLBACK.sh
+
+ORIGINAL_SHA256: 45dd292625ee6b42d751ab0a0acd6f6595b5e1f062e58d0ab0af4ef7bbc8445e
+MODIFIED_SHA256: 442561f3a5820520cbf6d67a7a68a3dfeb251bab34186d417c7576d0266c9414
+
+BASELINE:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: dev 110fc78f66f175a4040f5fc6a4bd412f2a79ea27 from work/registration-success-efficiency/baseline/reg
+LITERAL_OUTPUT_RESULT: BASELINE_COMPILE_EXIT=0 / BASELINE_TEST_EXIT=0 / Ran 35 tests / OK
+EXIT_STATUS: 0
+
+MODIFIED:
+COMMAND: python -m py_compile main.py mail_providers.py start_reg.py test_mail_providers.py; python -m unittest test_mail_providers.py
+INPUT: current reg/main.py, reg/mail_providers.py, reg/start_reg.py, reg/test_mail_providers.py
+LITERAL_OUTPUT_RESULT: UNIT_TESTS=45 EXIT=0 / OK
+EXIT_STATUS: 0
+
+MODIFIED_CONCURRENT_LIVE:
+COMMAND: python work/registration-success-efficiency/run_100.py
+INPUT: count=100, threads=5, max_retries=5, turnstile_concurrency=5, turnstile_mode=always, OTP interval=40s, HTTP 429 cooldown=3600s, Resin platforms=node,jp,us,de,github,baokemeng, MailPoolHub provider=random, ignored local credentials
+LITERAL_OUTPUT_RESULT: started_at=2026-09-02T00:35:25 / finished_at=2026-09-02T07:37:25 / successful progress=100/100 / attempts=110 / failed replacements=10 / key_lines_before=218 / key_lines_after=318 / key_lines_added=100 / exit_code=0 / start_reg.log bytes=571954
+EXIT_STATUS: 0
+
+ROLLBACK:
+COMMAND: C:/Program Files/Git/bin/bash.exe -lc "ROLLBACK.sh ROLLBACK_TEST_FILE"
+INPUT: ROLLBACK_TEST_FILE copied from MODIFIED_FILE, SHA256 442561f3a5820520cbf6d67a7a68a3dfeb251bab34186d417c7576d0266c9414
+LITERAL_OUTPUT_RESULT: 45dd292625ee6b42d751ab0a0acd6f6595b5e1f062e58d0ab0af4ef7bbc8445e *ROLLBACK_TEST_FILE / ROLLBACK_EXIT=0
+EXIT_STATUS: 0
+RESTORED_BEHAVIOR_STATUS: rollback test copy matches the original main.py hash; MODIFIED_FILE remains changed with SHA256 442561f3a5820520cbf6d67a7a68a3dfeb251bab34186d417c7576d0266c9414.

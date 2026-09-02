@@ -1,0 +1,37 @@
+OBJECT: first non-empty line of reg/get_apikey.txt only; SHA-256 fingerprint prefix 061f8e614740.
+ORIGINAL_FILE_SHA256: B18B76A0FC88416BFD7D586A1EEDA27DD0F7E068B151B012473ECBE11566C02E
+
+CHANGED_BRANCH: each authenticated catalog model receives one minimal completion call, with immediate checkpoint persistence and single-account cooldown stop.
+CHANGED_FIELD: declared_context is compared with runtime usage.prompt_tokens for the boundary sample.
+
+ARTIFACTS:
+MODIFIED_FILE: D:\projects\github\todo2api\work\single-key-model-probe\probe_models.py
+DIFF_FILE: D:\projects\github\todo2api\work\single-key-model-probe\probe_models.diff
+VERIFICATION: D:\projects\github\todo2api\work\single-key-model-probe\VERIFICATION.txt
+ROLLBACK: D:\projects\github\todo2api\work\single-key-model-probe\ROLLBACK.sh
+
+BASELINE
+command: GET https://api.todofor.ai/api/v1/models with X-API-Key from the first key only
+input: one API key; second key not loaded
+literal result: HTTP 200; count 53
+exit status: 0
+
+MODIFIED
+command: python probe_models.py
+input: local todo2api gateway at 127.0.0.1:18080 configured with one upstream account
+literal result: 53/53 models returned HTTP 200 and non-empty content; average 4.05s; P95 5.62s
+exit status: 0
+
+CONTEXT
+command: incremental muse-glimmer-30b prompts through /v1/chat/completions
+input: repeated deterministic token-shaped text; usage.prompt_tokens used as measurement
+literal result: largest successful prompt_tokens=523004; catalog context_length=131072; first higher run ended ERROR
+exit status: 0 for the 523004-token call
+terminal status: sole key reached its 2 USD credit limit; no second key was used
+
+ROLLBACK
+command: C:\Program Files\Git\bin\sh.exe ROLLBACK.sh <rollback-fixture>
+input: copied probe_models.py, model_probe_results.json, context_probe_results.json, and MODEL_PROBE_REPORT.md
+literal output: removed probe artifacts under: <rollback-fixture>
+exit status: 0
+restored behavior/status: copied probe artifacts absent; workspace MODIFIED_FILE and results remain present.
