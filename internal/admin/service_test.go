@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,6 +90,108 @@ func TestModelsCatalogRequiresLoginAndReturnsStaticModels(t *testing.T) {
 	}
 	if len(response.Models) != response.Total || response.Models[0].Pricing == nil {
 		t.Fatalf("models = %#v", response.Models)
+	}
+}
+
+func TestModelRefreshEndpointUpdatesCatalogAndPreservesLastGoodModels(t *testing.T) {
+	var state atomic.Value
+	state.Store("before")
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/models":
+			if state.Load().(string) == "error" {
+				http.Error(w, "catalog unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{{
+					"id": "provider/model-" + state.Load().(string),
+				}},
+			})
+		case "/api/v1/agents":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "agent-1", "model": "template:model"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	data := fmt.Sprintf(`
+storage: {path: data/test.db, master_key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}
+web: {admin_username: admin, admin_password: secret, session_ttl: 12h}
+pool:
+  strategy: round_robin
+  keys:
+    - {api_key: test-key, project_id: project-1}
+models: {default: "provider:provider/model-before"}
+upstream: {base_url: %q, poll_timeout: 1s}
+`, upstreamServer.URL+"/api/v1")
+	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(context.Background(), cfg, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	p, err := pool.New(cfg, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(cfg, store, p)
+	mux := http.NewServeMux()
+	service.Register(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "http://example.test/api/models/refresh", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated refresh status = %d", recorder.Code)
+	}
+	cookie := login(t, mux)
+	request = httptest.NewRequest(http.MethodGet, "http://example.test/api/models/refresh", nil)
+	request.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET refresh status = %d", recorder.Code)
+	}
+
+	state.Store("after")
+	request = httptest.NewRequest(http.MethodPost, "http://example.test/api/models/refresh", nil)
+	request.AddCookie(cookie)
+	request.Header.Set("Origin", "http://example.test")
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response modelcatalog.Response
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Model("provider/model-after"); !ok || response.Available != 1 {
+		t.Fatalf("models=%#v response=%#v", p.Models(), response)
+	}
+
+	state.Store("error")
+	request = httptest.NewRequest(http.MethodPost, "http://example.test/api/models/refresh", nil)
+	request.AddCookie(cookie)
+	request.Header.Set("Origin", "http://example.test")
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("failed refresh status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, ok := p.Model("provider/model-after"); !ok {
+		t.Fatalf("failed refresh replaced last good models: %#v", p.Models())
 	}
 }
 

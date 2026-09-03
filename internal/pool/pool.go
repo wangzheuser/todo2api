@@ -14,7 +14,10 @@ import (
 	"todo2api/internal/upstream"
 )
 
-var ErrInitializationInProgress = errors.New("account initialization is already in progress")
+var (
+	ErrInitializationInProgress = errors.New("account initialization is already in progress")
+	ErrModelRefreshInProgress   = errors.New("model refresh is already in progress")
+)
 
 // Account is one pooled todofor.ai API key + its upstream client.
 type Account struct {
@@ -164,6 +167,8 @@ type Pool struct {
 	mu                   sync.Mutex // serializes Warm progress and ReloadKeys planning
 	reconcileMu          sync.Mutex
 	readyMu              sync.RWMutex
+	modelMu              sync.RWMutex
+	modelRefreshing      atomic.Bool
 	models               []upstream.ModelInfo
 	modelByID            map[string]upstream.ModelInfo
 	modelByRunner        map[string]upstream.ModelInfo
@@ -395,6 +400,8 @@ func initializeAccount(ctx context.Context, cfg *config.Config, account *Account
 // Models returns the models common to every account. IDs are the shortest
 // unambiguous public aliases. An incomplete discovery yields no dynamic list.
 func (p *Pool) Models() []upstream.ModelInfo {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	return append([]upstream.ModelInfo(nil), p.models...)
 }
 
@@ -405,6 +412,8 @@ func (p *Pool) ModelCatalogComplete() bool {
 
 // Model finds model metadata by public alias, full upstream ID, or runner ID.
 func (p *Pool) Model(id string) (upstream.ModelInfo, bool) {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	if model, ok := p.modelByID[id]; ok {
 		return model, true
 	}
@@ -422,12 +431,77 @@ func (p *Pool) ResolveModel(id string) string {
 
 // PublicModelID returns the short public alias for a discovered model.
 func (p *Pool) PublicModelID(id string) (string, bool) {
-	model, ok := p.Model(id)
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
+	model, ok := p.modelByID[id]
+	if !ok {
+		model, ok = p.modelByRunner[id]
+	}
 	if !ok {
 		return "", false
 	}
 	publicID, ok := p.publicIDByID[model.ID]
 	return publicID, ok
+}
+
+// RefreshModels reloads the upstream catalog from a bounded set of ready accounts.
+func (p *Pool) RefreshModels(ctx context.Context) error {
+	if !p.modelRefreshing.CompareAndSwap(false, true) {
+		return ErrModelRefreshInProgress
+	}
+	defer p.modelRefreshing.Store(false)
+
+	p.readyMu.RLock()
+	accounts := make([]*Account, 0, bootstrapAccounts)
+	for _, account := range p.accounts {
+		if account != nil && !account.disabled.Load() && !account.removed.Load() {
+			accounts = append(accounts, account)
+			if len(accounts) == bootstrapAccounts {
+				break
+			}
+		}
+	}
+	p.readyMu.RUnlock()
+	if len(accounts) == 0 {
+		return fmt.Errorf("no ready accounts for model refresh")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	type result struct {
+		models []upstream.ModelInfo
+		err    error
+	}
+	results := make([]result, len(accounts))
+	var wg sync.WaitGroup
+	for i, account := range accounts {
+		wg.Add(1)
+		go func(index int, account *Account) {
+			defer wg.Done()
+			runtime := account.Runtime()
+			if runtime.Client == nil {
+				results[index].err = fmt.Errorf("account client is unavailable")
+				return
+			}
+			results[index].models, results[index].err = runtime.Client.Models(ctx)
+		}(i, account)
+	}
+	wg.Wait()
+
+	catalogs := make([][]upstream.ModelInfo, 0, len(results))
+	for i, result := range results {
+		if result.err != nil {
+			return fmt.Errorf("refresh models from account %d: %w", i+1, result.err)
+		}
+		catalogs = append(catalogs, result.models)
+	}
+	models := commonModels(catalogs)
+	if len(models) == 0 {
+		return fmt.Errorf("refreshed model catalog is empty")
+	}
+	p.setModels(models)
+	p.modelCatalogComplete.Store(true)
+	return nil
 }
 
 func (p *Pool) Warnings() []error {
@@ -671,6 +745,8 @@ func (p *Pool) addReady(account *Account) {
 }
 
 func (p *Pool) setModels(models []upstream.ModelInfo) {
+	p.modelMu.Lock()
+	defer p.modelMu.Unlock()
 	publicIDs := publicModelIDs(models)
 	p.models = make([]upstream.ModelInfo, 0, len(models))
 	p.modelByID = make(map[string]upstream.ModelInfo, len(models)*2)

@@ -122,6 +122,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stats", s.requireAuth(s.handleStats))
 	mux.HandleFunc("/api/stats/models", s.requireAuth(s.handleModelStats))
 	mux.HandleFunc("/api/models", s.requireAuth(s.handleModels))
+	mux.HandleFunc("/api/models/refresh", s.requireAuth(s.sameOrigin(s.handleModelRefresh)))
 	mux.HandleFunc("/api/events", s.requireAuth(s.handleEvents))
 }
 
@@ -129,6 +130,23 @@ func (s *Service) Register(mux *http.ServeMux) {
 func (s *Service) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.modelCatalog.Models())
+}
+
+// handleModelRefresh synchronizes the shared upstream model catalog.
+func (s *Service) handleModelRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if err := s.pool.RefreshModels(r.Context()); err != nil {
+		if errors.Is(err, pool.ErrModelRefreshInProgress) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, s.modelCatalog.Models())

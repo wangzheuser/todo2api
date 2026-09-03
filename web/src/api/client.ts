@@ -106,6 +106,12 @@ export const api = {
     return apiFetch<ModelCatalogResponse>("/models");
   },
 
+  refreshModels(): Promise<ModelCatalogResponse> {
+    return apiFetch<ModelCatalogResponse>("/models/refresh", {
+      method: "POST",
+    });
+  },
+
   deleteAccount(id: number): Promise<void> {
     return apiFetch<void>(`/accounts/${id}`, { method: "DELETE" });
   },

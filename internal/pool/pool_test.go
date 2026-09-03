@@ -234,6 +234,109 @@ func TestCommonModelsWithoutSuccessfulCatalog(t *testing.T) {
 	}
 }
 
+func TestRefreshModelsPublishesSuccessAndPreservesLastGoodCatalog(t *testing.T) {
+	var state atomic.Value
+	state.Store("before")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/models":
+			switch state.Load().(string) {
+			case "error":
+				http.Error(w, "catalog unavailable", http.StatusServiceUnavailable)
+			case "empty":
+				_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []any{}})
+			default:
+				name := state.Load().(string)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"object": "list",
+					"data":   []map[string]any{{"id": "provider/model-" + name}},
+				})
+			}
+		case "/api/v1/agents":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "agent-1", "model": "template:model"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	p, err := New(&config.Config{
+		Upstream: config.UpstreamConfig{BaseURL: server.URL + "/api/v1", PollTimeout: time.Second},
+		Pool: config.PoolConfig{Strategy: "round_robin", Keys: []config.AccountKey{{
+			APIKey: "key", ProjectID: "project-1",
+		}}},
+		Models: config.ModelsConfig{Default: "provider:provider/model-before"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Store("after")
+	if err := p.RefreshModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Model("provider/model-after"); !ok {
+		t.Fatalf("refreshed models = %#v", p.Models())
+	}
+	if _, ok := p.Model("provider/model-before"); ok {
+		t.Fatalf("stale model remained in %#v", p.Models())
+	}
+
+	for _, failingState := range []string{"error", "empty"} {
+		state.Store(failingState)
+		if err := p.RefreshModels(context.Background()); err == nil {
+			t.Fatalf("%s refresh unexpectedly succeeded", failingState)
+		}
+		if _, ok := p.Model("provider/model-after"); !ok {
+			t.Fatalf("%s refresh replaced last good catalog: %#v", failingState, p.Models())
+		}
+	}
+}
+
+func TestRefreshModelsRejectsConcurrentRefresh(t *testing.T) {
+	var blocking atomic.Bool
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/models":
+			if blocking.Load() {
+				entered <- struct{}{}
+				<-release
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list", "data": []map[string]any{{"id": "provider/model"}},
+			})
+		case "/api/v1/agents":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "agent-1", "model": "template:model"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	p, err := New(&config.Config{
+		Upstream: config.UpstreamConfig{BaseURL: server.URL + "/api/v1", PollTimeout: time.Second},
+		Pool: config.PoolConfig{Strategy: "round_robin", Keys: []config.AccountKey{{
+			APIKey: "key", ProjectID: "project-1",
+		}}},
+		Models: config.ModelsConfig{Default: "provider:provider/model"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocking.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- p.RefreshModels(context.Background()) }()
+	<-entered
+	if err := p.RefreshModels(context.Background()); !errors.Is(err, ErrModelRefreshInProgress) {
+		t.Fatalf("concurrent refresh error = %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNewKeepsAccountWhenModelDiscoveryFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

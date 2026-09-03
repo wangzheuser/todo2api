@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, Search } from "lucide-react";
+import { Boxes, RefreshCw, Search } from "lucide-react";
+import { toast } from "sonner";
 import { api, ApiError } from "@/api/client";
 import type { CatalogModel, ModelCatalogResponse } from "@/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -75,6 +77,7 @@ function compareModels(
 export function ModelsPage() {
   const [catalog, setCatalog] = useState<ModelCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [availability, setAvailability] =
@@ -101,6 +104,26 @@ export function ModelsPage() {
     };
   }, []);
 
+  /** handleRefresh synchronizes upstream models without resetting table controls. */
+  async function handleRefresh() {
+    setRefreshing(true);
+    setError("");
+    try {
+      const response = await api.refreshModels();
+      setCatalog(response);
+      toast.success(`已同步 ${response.available} 个可用模型`);
+    } catch (requestError: unknown) {
+      const message =
+        requestError instanceof ApiError
+          ? requestError.message
+          : "模型目录刷新失败";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const models = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return [...(catalog?.models ?? [])]
@@ -126,14 +149,24 @@ export function ModelsPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-5">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <Boxes className="text-primary" size={24} />
-          <h1 className="text-2xl font-semibold tracking-tight">模型列表</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Boxes className="text-primary" size={24} />
+            <h1 className="text-2xl font-semibold tracking-tight">模型列表</h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            价格单位为 USD / 1M tokens；强制刷新同步上游模型，价格仍使用当前快照。
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          价格单位为 USD / 1M tokens；默认按当前输入与输出合计价升序。
-        </p>
+        <Button
+          variant="outline"
+          disabled={refreshing}
+          onClick={handleRefresh}
+        >
+          <RefreshCw className={refreshing ? "animate-spin" : ""} />
+          {refreshing ? "正在同步…" : "强制刷新"}
+        </Button>
       </div>
 
       {error && (
@@ -238,7 +271,7 @@ export function ModelsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>模型</TableHead>
-                <TableHead>Provider</TableHead>
+                <TableHead>计费渠道</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">上下文</TableHead>
                 <TableHead className="text-right">最大输出</TableHead>
