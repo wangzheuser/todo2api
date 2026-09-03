@@ -13,6 +13,7 @@ import (
 	"todo2api/internal/config"
 	"todo2api/internal/gateway"
 	"todo2api/internal/pool"
+	"todo2api/internal/proxypool"
 	"todo2api/internal/session"
 	"todo2api/internal/storage"
 	"todo2api/internal/transport"
@@ -39,12 +40,24 @@ func main() {
 		log.Fatalf("storage: %v", err)
 	}
 	defer store.Close()
+	proxyValue, err := store.ProxyPool(ctx)
+	if err != nil {
+		log.Fatalf("load proxy pool: %v", err)
+	}
+	proxyURLs, err := proxypool.Parse(proxyValue)
+	if err != nil {
+		log.Fatalf("parse proxy pool: %v", err)
+	}
+	proxies, err := proxypool.New(proxyURLs)
+	if err != nil {
+		log.Fatalf("initialize proxy pool: %v", err)
+	}
 	keys, err := store.PoolKeys(ctx)
 	if err != nil {
 		log.Fatalf("load accounts: %v", err)
 	}
 	cfg.Pool.Keys = keys
-	p, err := pool.New(cfg, store)
+	p, err := pool.NewWithProxyPool(cfg, proxies, store)
 	if err != nil {
 		log.Fatalf("pool: %v", err)
 	}
@@ -64,7 +77,7 @@ func main() {
 
 	sess := session.New()
 	sess.StartCleanupContext(ctx, 5*time.Minute)
-	adminService := admin.New(cfg, store, p, ctx)
+	adminService := admin.NewWithProxyPool(cfg, store, p, proxies, ctx)
 	p.SetRepository(adminService)
 	warmDone := make(chan struct{})
 	go func() {

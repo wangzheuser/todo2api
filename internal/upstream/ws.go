@@ -1,12 +1,16 @@
 package upstream
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -44,11 +48,28 @@ func (c *Client) PrepareSubscription(ctx context.Context) (*Subscription, error)
 		return nil, err
 	}
 
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 15 * time.Second,
-		Subprotocols:     []string{c.apiKey},
+	var conn *websocket.Conn
+	var resp *http.Response
+	if c.proxies != nil {
+		for _, candidate := range c.proxies.Candidates(c.accountID, 2) {
+			conn, resp, err = c.dialFrontend(ctx, wsEndpoint, candidate.URL)
+			if err == nil {
+				c.proxies.MarkSucceeded(c.accountID, candidate.Key)
+				break
+			}
+			if resp != nil && resp.StatusCode != http.StatusProxyAuthRequired {
+				break
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+			c.proxies.MarkFailed(c.accountID, candidate.Key)
+			resp = nil
+		}
 	}
-	conn, resp, err := dialer.DialContext(ctx, wsEndpoint, nil)
+	if conn == nil && resp == nil {
+		conn, resp, err = c.dialFrontend(ctx, wsEndpoint, nil)
+	}
 	if err != nil {
 		if resp != nil {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -73,6 +94,71 @@ func (c *Client) PrepareSubscription(ctx context.Context) (*Subscription, error)
 		}
 	}()
 	return sub, nil
+}
+
+func (c *Client) dialFrontend(ctx context.Context, endpoint string, proxyURL *url.URL) (*websocket.Conn, *http.Response, error) {
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+		Subprotocols:     []string{c.apiKey},
+	}
+	if proxyURL != nil {
+		if proxyURL.Scheme == "https" {
+			dialer.NetDialContext = httpsProxyDialContext(proxyURL)
+		} else {
+			dialer.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
+	return dialer.DialContext(ctx, endpoint, nil)
+}
+
+func httpsProxyDialContext(proxyURL *url.URL) func(context.Context, string, string) (net.Conn, error) {
+	return httpsProxyDialContextWithConfig(proxyURL, nil)
+}
+
+func httpsProxyDialContextWithConfig(proxyURL *url.URL, baseTLS *tls.Config) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, target string) (net.Conn, error) {
+		proxyAddress := proxyURL.Host
+		if proxyURL.Port() == "" {
+			proxyAddress = net.JoinHostPort(proxyURL.Hostname(), "443")
+		}
+		plain, err := (&net.Dialer{}).DialContext(ctx, network, proxyAddress)
+		if err != nil {
+			return nil, err
+		}
+		config := &tls.Config{MinVersion: tls.VersionTLS12}
+		if baseTLS != nil {
+			config = baseTLS.Clone()
+			config.MinVersion = tls.VersionTLS12
+		}
+		config.ServerName = proxyURL.Hostname()
+		tunnel := tls.Client(plain, config)
+		if err := tunnel.HandshakeContext(ctx); err != nil {
+			plain.Close()
+			return nil, err
+		}
+		header := make(http.Header)
+		if proxyURL.User != nil {
+			password, _ := proxyURL.User.Password()
+			credentials := base64.StdEncoding.EncodeToString([]byte(proxyURL.User.Username() + ":" + password))
+			header.Set("Proxy-Authorization", "Basic "+credentials)
+		}
+		request := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: header}
+		if err := request.Write(tunnel); err != nil {
+			tunnel.Close()
+			return nil, err
+		}
+		response, err := http.ReadResponse(bufio.NewReader(tunnel), request)
+		if err != nil {
+			tunnel.Close()
+			return nil, err
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			tunnel.Close()
+			return nil, fmt.Errorf("https proxy CONNECT failed: %s", response.Status)
+		}
+		return tunnel, nil
+	}
 }
 
 // Subscribe is a convenience method for callers that do not need to connect

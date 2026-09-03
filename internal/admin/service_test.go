@@ -158,6 +158,49 @@ func TestPoolSettingsStorageFailureKeepsRuntimeValue(t *testing.T) {
 	}
 }
 
+func TestProxyPoolEndpointReplacesWholeValueAtomically(t *testing.T) {
+	_, mux, store := testService(t)
+	cookie := login(t, mux)
+
+	put := func(value string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPut, "http://example.test/api/proxy-pool", strings.NewReader(fmt.Sprintf(`{"value":%q}`, value)))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", "http://example.test")
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	recorder := put(" HTTP://User:pass@Example.COM:8080 \n\nhttp://User:pass@example.com:8080")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response proxyPoolResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Count != 1 || response.Value != "http://User:pass@example.com:8080" {
+		t.Fatalf("response=%#v", response)
+	}
+
+	recorder = put("socks5://proxy.test:1080")
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "第 1 行") {
+		t.Fatalf("invalid PUT status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if value, err := store.ProxyPool(context.Background()); err != nil || value != response.Value {
+		t.Fatalf("invalid request changed value=%q err=%v", value, err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/api/proxy-pool", nil)
+	request.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "User:pass") {
+		t.Fatalf("GET status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestModelRefreshEndpointUpdatesCatalogAndPreservesLastGoodModels(t *testing.T) {
 	var state atomic.Value
 	state.Store("before")

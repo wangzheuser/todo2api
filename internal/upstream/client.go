@@ -3,15 +3,21 @@ package upstream
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"todo2api/internal/proxypool"
 )
 
 // HTTPError preserves an error response from the todofor.ai API so callers
@@ -233,9 +239,11 @@ func (c *Client) AddMessageWithAttachments(ctx context.Context, projectID, todoI
 }
 
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	baseURL   string
+	apiKey    string
+	http      *http.Client
+	proxies   *proxypool.Pool
+	accountID string
 }
 
 // ModelInfo is one model advertised by the upstream OpenAI-compatible proxy.
@@ -278,6 +286,86 @@ func New(baseURL, apiKey string) *Client {
 			Transport: sharedHTTPTransport,
 		},
 	}
+}
+
+// NewWithProxyPool creates an account client whose requests share one sticky
+// proxy route across REST, uploads, polling, and WebSocket setup.
+func NewWithProxyPool(baseURL, apiKey string, accountID int64, proxies *proxypool.Pool) *Client {
+	if proxies == nil {
+		return New(baseURL, apiKey)
+	}
+	identity := "id:" + strconv.FormatInt(accountID, 10)
+	if accountID == 0 {
+		sum := sha256.Sum256([]byte(apiKey))
+		identity = fmt.Sprintf("key:%x", sum[:])
+	}
+	client := &Client{
+		baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey,
+		proxies: proxies, accountID: identity,
+	}
+	client.http = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &proxyRoundTripper{
+			proxies: proxies, accountID: identity, direct: sharedHTTPTransport,
+		},
+	}
+	return client
+}
+
+type proxyRoundTripper struct {
+	proxies   *proxypool.Pool
+	accountID string
+	direct    http.RoundTripper
+}
+
+// RoundTrip retries only failures observed before the upstream request was
+// written, so non-idempotent Todo operations are never replayed ambiguously.
+func (t *proxyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	for _, candidate := range t.proxies.Candidates(t.accountID, 2) {
+		attempt, wrote, err := cloneRequestWithTrace(req)
+		if err != nil {
+			return nil, err
+		}
+		response, roundErr := candidate.Transport.RoundTrip(attempt)
+		if response != nil && response.StatusCode == http.StatusProxyAuthRequired {
+			response.Body.Close()
+			t.proxies.MarkFailed(t.accountID, candidate.Key)
+			continue
+		}
+		if roundErr == nil {
+			t.proxies.MarkSucceeded(t.accountID, candidate.Key)
+			return response, nil
+		}
+		if wrote.Load() {
+			// The proxy tunnel worked; the request may already have reached upstream.
+			t.proxies.MarkSucceeded(t.accountID, candidate.Key)
+			return response, roundErr
+		}
+		t.proxies.MarkFailed(t.accountID, candidate.Key)
+	}
+	attempt, _, err := cloneRequestWithTrace(req)
+	if err != nil {
+		return nil, err
+	}
+	return t.direct.RoundTrip(attempt)
+}
+
+func cloneRequestWithTrace(req *http.Request) (*http.Request, *atomic.Bool, error) {
+	clone := req.Clone(req.Context())
+	if req.Body != nil {
+		if req.GetBody == nil {
+			return nil, nil, fmt.Errorf("request body cannot be replayed through proxy")
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, nil, err
+		}
+		clone.Body = body
+	}
+	wrote := &atomic.Bool{}
+	trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { wrote.Store(true) }}
+	clone = clone.WithContext(httptrace.WithClientTrace(clone.Context(), trace))
+	return clone, wrote, nil
 }
 
 // Models returns the model catalog used by the official todofor.ai CLI.

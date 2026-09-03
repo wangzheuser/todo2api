@@ -140,6 +140,40 @@ func TestWrongMasterKeyFails(t *testing.T) {
 	}
 }
 
+func TestProxyPoolIsEncryptedAndReplaceable(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t, t.TempDir())
+	store, err := Open(ctx, cfg, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if value, err := store.ProxyPool(ctx); err != nil || value != "" {
+		t.Fatalf("empty proxy pool=%q err=%v", value, err)
+	}
+	const value = "http://user:secret@proxy.test:8080\nhttps://other.test:8443"
+	if err := store.SetProxyPool(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.ProxyPool(ctx); err != nil || got != value {
+		t.Fatalf("proxy pool=%q err=%v", got, err)
+	}
+	var encoded string
+	if err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key=?`, proxyPoolKey).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(encoded, "secret") || !strings.HasPrefix(encoded, "v1:") {
+		t.Fatalf("stored proxy pool=%q", encoded)
+	}
+	if err := store.SetProxyPool(ctx, "http://replacement.test:3128"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.ProxyPool(ctx); got != "http://replacement.test:3128" {
+		t.Fatalf("replacement=%q", got)
+	}
+}
+
 func TestCiphertextUsesRandomNonceAndFingerprintDeduplicates(t *testing.T) {
 	ctx := context.Background()
 	cfg := testConfig(t, t.TempDir())

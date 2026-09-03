@@ -20,6 +20,7 @@ import (
 	"todo2api/internal/config"
 	"todo2api/internal/modelcatalog"
 	"todo2api/internal/pool"
+	"todo2api/internal/proxypool"
 	"todo2api/internal/storage"
 	"todo2api/internal/upstream"
 )
@@ -32,6 +33,7 @@ type Service struct {
 	cfg            *config.Config
 	store          *storage.Store
 	pool           *pool.Pool
+	proxies        *proxypool.Pool
 	modelCatalog   *modelcatalog.Service
 	ctx            context.Context
 	hub            *eventHub
@@ -90,13 +92,25 @@ type poolSettingsResponse struct {
 }
 
 func New(cfg *config.Config, store *storage.Store, p *pool.Pool, contexts ...context.Context) *Service {
+	return newService(cfg, store, p, nil, contexts...)
+}
+
+// NewWithProxyPool creates the admin service with the shared runtime proxy pool.
+func NewWithProxyPool(cfg *config.Config, store *storage.Store, p *pool.Pool, proxies *proxypool.Pool, contexts ...context.Context) *Service {
+	return newService(cfg, store, p, proxies, contexts...)
+}
+
+func newService(cfg *config.Config, store *storage.Store, p *pool.Pool, proxies *proxypool.Pool, contexts ...context.Context) *Service {
 	ctx := context.Background()
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx = contexts[0]
 	}
+	if proxies == nil {
+		proxies, _ = proxypool.New(nil)
+	}
 	s := &Service{
 		cfg: cfg, store: store, pool: p, modelCatalog: modelcatalog.NewService(p, cfg.Models.Aliases),
-		ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{},
+		proxies: proxies, ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{},
 	}
 	for _, cidr := range cfg.Web.TrustedProxies {
 		_, network, err := net.ParseCIDR(cidr)
@@ -128,6 +142,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stats/models", s.requireAuth(s.handleModelStats))
 	mux.HandleFunc("/api/models", s.requireAuth(s.handleModels))
 	mux.HandleFunc("/api/models/refresh", s.requireAuth(s.sameOrigin(s.handleModelRefresh)))
+	mux.HandleFunc("/api/proxy-pool", s.requireAuth(s.sameOrigin(s.handleProxyPool)))
 	mux.HandleFunc("/api/events", s.requireAuth(s.handleEvents))
 }
 
@@ -162,6 +177,53 @@ func (s *Service) handlePoolSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.hub.publish("accounts")
 		writeJSON(w, http.StatusOK, poolSettingsResponse{MaxActiveAccounts: s.pool.MaxActiveAccounts()})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+type proxyPoolResponse struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// handleProxyPool reads or atomically replaces the multiline proxy pool.
+func (s *Service) handleProxyPool(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		value, err := s.store.ProxyPool(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "load proxy pool failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, proxyPoolResponse{Value: value, Count: s.proxies.Len()})
+	case http.MethodPut:
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
+		var request struct {
+			Value string `json:"value"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		proxies, err := proxypool.Parse(request.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		value := strings.Join(proxies, "\n")
+		if err := s.store.SetProxyPool(r.Context(), value); err != nil {
+			writeError(w, http.StatusInternalServerError, "save proxy pool failed")
+			return
+		}
+		if err := s.proxies.Replace(proxies); err != nil {
+			writeError(w, http.StatusInternalServerError, "apply proxy pool failed")
+			return
+		}
+		s.hub.publish("proxies")
+		writeJSON(w, http.StatusOK, proxyPoolResponse{Value: value, Count: len(proxies)})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -752,7 +814,7 @@ func (s *Service) refreshOne(ctx context.Context, id int64) (storage.Account, er
 	if err != nil {
 		return a, err
 	}
-	cli := upstream.New(s.cfg.Upstream.BaseURL, a.APIKey)
+	cli := upstream.NewWithProxyPool(s.cfg.Upstream.BaseURL, a.APIKey, a.ID, s.proxies)
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	usage, err := cli.BillingUsage(checkCtx)

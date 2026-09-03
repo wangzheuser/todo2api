@@ -4,6 +4,7 @@ import type {
   ModelCatalogResponse,
   ModelStatsResponse,
   PoolSettings,
+  ProxyPoolResponse,
 } from "@/types";
 
 const BASE = "/api";
@@ -89,6 +90,17 @@ export const api = {
     return apiFetch<PoolSettings>("/accounts/settings", {
       method: "PUT",
       body: JSON.stringify({ max_active_accounts: maxActiveAccounts }),
+    });
+  },
+
+  getProxyPool(): Promise<ProxyPoolResponse> {
+    return apiFetch<ProxyPoolResponse>("/proxy-pool");
+  },
+
+  updateProxyPool(value: string): Promise<ProxyPoolResponse> {
+    return apiFetch<ProxyPoolResponse>("/proxy-pool", {
+      method: "PUT",
+      body: JSON.stringify({ value }),
     });
   },
 

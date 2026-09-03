@@ -4,6 +4,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { AccountsPage } from "@/pages/AccountsPage";
 import { ModelsPage } from "@/pages/ModelsPage";
+import { ProxyPoolPage } from "@/pages/ProxyPoolPage";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/models" element={<ModelsPage />} />
+        <Route path="/proxies" element={<ProxyPoolPage />} />
         <Route
           path="/registration"
           element={<Navigate to="/accounts" replace />}

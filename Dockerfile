@@ -9,9 +9,10 @@ RUN npm run build
 
 FROM golang:1.22-alpine AS go-builder
 ARG TARGETARCH=amd64
+ARG GOPROXY=https://proxy.golang.org,direct
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN GOPROXY="${GOPROXY}" go mod download
 COPY . ./
 COPY --from=web-builder /src/web/dist ./web/dist
 RUN go test ./... && \

@@ -27,6 +27,7 @@ const (
 	legacyMigrationKey = "legacy_keys_imported"
 	masterVerifierKey  = "master_key_verifier"
 	poolMaxActiveKey   = "pool_max_active_accounts"
+	proxyPoolKey       = "proxy_pool_v1"
 )
 
 type schemaMigration struct {
@@ -67,9 +68,10 @@ var schemaMigrations = []schemaMigration{
 }
 
 type Store struct {
-	db      *sql.DB
-	aead    cipher.AEAD
-	hmacKey []byte
+	db        *sql.DB
+	aead      cipher.AEAD
+	proxyAEAD cipher.AEAD
+	hmacKey   []byte
 }
 
 type Account struct {
@@ -164,7 +166,15 @@ func Open(ctx context.Context, cfg *config.Config, masterKey []byte) (*Store, er
 	if err != nil {
 		return cleanup(err)
 	}
-	s := &Store{db: db, aead: aead, hmacKey: derive(masterKey, "todo2api/account-fingerprint/v1")}
+	proxyBlock, err := aes.NewCipher(derive(masterKey, "todo2api/proxy-pool-encryption/v1"))
+	if err != nil {
+		return cleanup(err)
+	}
+	proxyAEAD, err := cipher.NewGCM(proxyBlock)
+	if err != nil {
+		return cleanup(err)
+	}
+	s := &Store{db: db, aead: aead, proxyAEAD: proxyAEAD, hmacKey: derive(masterKey, "todo2api/account-fingerprint/v1")}
 	if err := s.migrate(ctx); err != nil {
 		return cleanup(err)
 	}
@@ -181,6 +191,42 @@ func Open(ctx context.Context, cfg *config.Config, masterKey []byte) (*Store, er
 		return cleanup(err)
 	}
 	return s, nil
+}
+
+// ProxyPool returns the decrypted multiline proxy configuration.
+func (s *Store) ProxyPool(ctx context.Context) (string, error) {
+	var encoded string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key=?`, proxyPoolKey).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	data, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(encoded, "v1:"))
+	if err != nil || !strings.HasPrefix(encoded, "v1:") || len(data) < s.proxyAEAD.NonceSize() {
+		return "", fmt.Errorf("decrypt proxy pool: invalid encrypted value")
+	}
+	nonce := data[:s.proxyAEAD.NonceSize()]
+	plain, err := s.proxyAEAD.Open(nil, nonce, data[s.proxyAEAD.NonceSize():], nil)
+	if err != nil {
+		return "", fmt.Errorf("decrypt proxy pool: invalid master key or data")
+	}
+	return string(plain), nil
+}
+
+// SetProxyPool atomically replaces the encrypted multiline proxy configuration.
+func (s *Store) SetProxyPool(ctx context.Context, value string) error {
+	nonce := make([]byte, s.proxyAEAD.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	sealed := s.proxyAEAD.Seal(nil, nonce, []byte(value), nil)
+	data := append(nonce, sealed...)
+	encoded := "v1:" + base64.RawStdEncoding.EncodeToString(data)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO metadata(key,value) VALUES(?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, proxyPoolKey, encoded)
+	return err
 }
 
 func ensureStoragePath(path string) error {

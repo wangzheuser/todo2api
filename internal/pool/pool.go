@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"todo2api/internal/config"
+	"todo2api/internal/proxypool"
 	"todo2api/internal/upstream"
 )
 
@@ -48,9 +49,9 @@ type AccountRuntime struct {
 	EdgeTools upstream.FilteredEdgeTools
 }
 
-func newAccount(baseURL string, key config.AccountKey) *Account {
+func newAccount(baseURL string, key config.AccountKey, proxies *proxypool.Pool) *Account {
 	return &Account{
-		ID: key.ID, Client: upstream.New(baseURL, key.APIKey), key: key,
+		ID: key.ID, Client: upstream.NewWithProxyPool(baseURL, key.APIKey, key.ID, proxies), key: key,
 	}
 }
 
@@ -179,6 +180,7 @@ type Pool struct {
 	cfg                  *config.Config
 	repo                 AccountRepository
 	warmStart            int
+	proxies              *proxypool.Pool
 	modelCatalogComplete atomic.Bool
 }
 
@@ -219,13 +221,22 @@ type accountInitResult struct {
 }
 
 func New(cfg *config.Config, repositories ...AccountRepository) (*Pool, error) {
-	p := &Pool{strategy: cfg.Pool.Strategy, cfg: cfg}
+	return newPool(cfg, nil, repositories...)
+}
+
+// NewWithProxyPool builds the account pool with shared sticky proxy routing.
+func NewWithProxyPool(cfg *config.Config, proxies *proxypool.Pool, repositories ...AccountRepository) (*Pool, error) {
+	return newPool(cfg, proxies, repositories...)
+}
+
+func newPool(cfg *config.Config, proxies *proxypool.Pool, repositories ...AccountRepository) (*Pool, error) {
+	p := &Pool{strategy: cfg.Pool.Strategy, cfg: cfg, proxies: proxies}
 	p.maxActiveAccounts.Store(config.DefaultPoolMaxActiveAccounts)
 	if len(repositories) > 0 {
 		p.repo = repositories[0]
 	}
 	for _, key := range cfg.Pool.Keys {
-		account := newAccount(cfg.Upstream.BaseURL, key)
+		account := newAccount(cfg.Upstream.BaseURL, key, proxies)
 		if key.ID != 0 && !key.Enabled {
 			account.disabled.Store(true)
 		}
@@ -661,7 +672,7 @@ func (p *Pool) ReloadKeys(ctx context.Context, keys []config.AccountKey) (Reload
 			}
 			continue
 		}
-		account := newAccount(p.cfg.Upstream.BaseURL, key)
+		account := newAccount(p.cfg.Upstream.BaseURL, key, p.proxies)
 		if key.ID != 0 && !key.Enabled {
 			account.disabled.Store(true)
 		}
@@ -682,7 +693,7 @@ func (p *Pool) ReloadKeys(ctx context.Context, keys []config.AccountKey) (Reload
 
 	for _, update := range changed {
 		update.account.removeMu.Lock()
-		candidate := newAccount(p.cfg.Upstream.BaseURL, update.key)
+		candidate := newAccount(p.cfg.Upstream.BaseURL, update.key, p.proxies)
 		if update.key.ID != 0 && !update.key.Enabled {
 			candidate.disabled.Store(true)
 			update.account.installCandidate(candidate, update.key)

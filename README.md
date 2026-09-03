@@ -103,6 +103,12 @@ local gateway usage statistics. The account page can also bulk-import keys by
 pasting one key per line or selecting a TXT file; blank lines, comments, and
 duplicates are ignored. Registration automation is intentionally disabled.
 
+The `代理池` page accepts one `http://` or `https://` proxy URL per line. The
+normalized list is encrypted in SQLite with `storage.master_key`. Accounts use
+a stable consistent-hash choice; a proxy connection failure tries one sticky
+fallback for that account, then uses a direct connection for that operation.
+Saving an empty list restores direct-only forwarding.
+
 ## Build for Linux
 
 The build script installs the locked WebUI dependencies, builds the embedded

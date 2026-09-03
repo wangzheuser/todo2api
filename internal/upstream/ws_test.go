@@ -1,10 +1,16 @@
 package upstream
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +26,78 @@ func TestFrontendWSURL(t *testing.T) {
 	}
 	if got != "wss://api.todofor.ai/ws/v1/frontend?tabId=tab-1" {
 		t.Fatalf("URL = %q", got)
+	}
+}
+
+func TestHTTPSProxyDialCreatesAuthenticatedTunnel(t *testing.T) {
+	target, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	go func() {
+		connection, acceptErr := target.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		buffer := make([]byte, 4)
+		_, _ = io.ReadFull(connection, buffer)
+		if string(buffer) == "ping" {
+			_, _ = connection.Write([]byte("pong"))
+		}
+	}()
+
+	proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect || r.Host != target.Addr().String() {
+			t.Errorf("CONNECT method=%s host=%s", r.Method, r.Host)
+			http.Error(w, "bad tunnel", http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpwYXNz" {
+			t.Errorf("Proxy-Authorization=%q", r.Header.Get("Proxy-Authorization"))
+		}
+		upstream, dialErr := net.Dial("tcp", r.Host)
+		if dialErr != nil {
+			http.Error(w, dialErr.Error(), http.StatusBadGateway)
+			return
+		}
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("proxy response does not support hijacking")
+			upstream.Close()
+			return
+		}
+		client, buffered, hijackErr := hijacker.Hijack()
+		if hijackErr != nil {
+			t.Error(hijackErr)
+			upstream.Close()
+			return
+		}
+		defer client.Close()
+		defer upstream.Close()
+		_, _ = buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		_ = buffered.Flush()
+		go func() { _, _ = io.Copy(upstream, client) }()
+		_, _ = io.Copy(client, upstream)
+	}))
+	defer proxy.Close()
+
+	proxyURL, _ := url.Parse(strings.Replace(proxy.URL, "https://", "https://user:pass@", 1))
+	roots := x509.NewCertPool()
+	roots.AddCert(proxy.Certificate())
+	dial := httpsProxyDialContextWithConfig(proxyURL, &tls.Config{RootCAs: roots})
+	connection, err := dial(context.Background(), "tcp", target.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if _, err := connection.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	response, err := bufio.NewReader(connection).ReadString('g')
+	if err != nil || response != "pong" {
+		t.Fatalf("response=%q err=%v", response, err)
 	}
 }
 

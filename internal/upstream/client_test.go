@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"todo2api/internal/proxypool"
 )
 
 func TestHTTPErrorPreservesUpstreamDetails(t *testing.T) {
@@ -45,6 +48,84 @@ func TestClientsShareBoundedTransport(t *testing.T) {
 	transport, ok := first.http.Transport.(*http.Transport)
 	if !ok || transport.MaxConnsPerHost <= 0 || transport.MaxConnsPerHost > 64 {
 		t.Fatalf("shared transport is not bounded: %#v", first.http.Transport)
+	}
+}
+
+func TestProxyPoolFailsOverOnceAndKeepsFallbackSticky(t *testing.T) {
+	var targetCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(modelListResp{Data: []ModelInfo{{ID: "provider/model"}}})
+	}))
+	defer target.Close()
+
+	var firstCalls, secondCalls atomic.Int32
+	var failFirst, failSecond atomic.Bool
+	proxyHandler := func(calls *atomic.Int32, failing *atomic.Bool) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if r.Header.Get("Proxy-Authorization") == "" {
+				t.Error("missing proxy authorization")
+			}
+			if failing.Load() {
+				w.WriteHeader(http.StatusProxyAuthRequired)
+				return
+			}
+			request := r.Clone(r.Context())
+			request.RequestURI = ""
+			request.Header.Del("Proxy-Authorization")
+			response, err := http.DefaultTransport.RoundTrip(request)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer response.Body.Close()
+			for key, values := range response.Header {
+				w.Header()[key] = values
+			}
+			w.WriteHeader(response.StatusCode)
+			_, _ = io.Copy(w, response.Body)
+		}
+	}
+	first := httptest.NewServer(proxyHandler(&firstCalls, &failFirst))
+	defer first.Close()
+	second := httptest.NewServer(proxyHandler(&secondCalls, &failSecond))
+	defer second.Close()
+	withAuth := func(value string) string { return strings.Replace(value, "http://", "http://user:pass@", 1) }
+	proxies, err := proxypool.New([]string{withAuth(first.URL), withAuth(second.URL)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary := proxies.Candidates("id:7", 1)[0].URL.Host
+	if primary == strings.TrimPrefix(first.URL, "http://") {
+		failFirst.Store(true)
+	} else {
+		failSecond.Store(true)
+	}
+
+	client := NewWithProxyPool(target.URL, "key", 7, proxies)
+	for range 2 {
+		models, err := client.Models(context.Background())
+		if err != nil || len(models) != 1 {
+			t.Fatalf("models=%#v err=%v", models, err)
+		}
+	}
+	if targetCalls.Load() != 2 {
+		t.Fatalf("target calls=%d", targetCalls.Load())
+	}
+	if firstCalls.Load()+secondCalls.Load() != 3 {
+		t.Fatalf("proxy calls first=%d second=%d", firstCalls.Load(), secondCalls.Load())
+	}
+
+	beforeProxyCalls := firstCalls.Load() + secondCalls.Load()
+	failFirst.Store(true)
+	failSecond.Store(true)
+	models, err := NewWithProxyPool(target.URL, "other-key", 9, proxies).Models(context.Background())
+	if err != nil || len(models) != 1 || targetCalls.Load() != 3 {
+		t.Fatalf("direct fallback models=%#v targetCalls=%d err=%v", models, targetCalls.Load(), err)
+	}
+	if got := firstCalls.Load() + secondCalls.Load() - beforeProxyCalls; got != 2 {
+		t.Fatalf("proxy attempts before direct=%d want=2", got)
 	}
 }
 

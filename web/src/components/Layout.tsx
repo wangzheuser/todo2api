@@ -9,6 +9,7 @@ import {
   Monitor,
   Menu,
   Boxes,
+  Network,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ import { api } from "@/api/client";
 const navItems = [
   { to: "/dashboard", icon: LayoutDashboard, label: "概览" },
   { to: "/accounts", icon: Users, label: "账号管理" },
+  { to: "/proxies", icon: Network, label: "代理池" },
   { to: "/models", icon: Boxes, label: "模型列表" },
 ];
 
