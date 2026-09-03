@@ -219,6 +219,7 @@ type mockUpstream struct {
 	dropWSEvents            bool
 	restTodoStatus          string
 	silentKeys              map[string]bool
+	runErrors               map[string]string
 }
 
 func newMockUpstream(t *testing.T) *mockUpstream {
@@ -226,6 +227,7 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 	m := &mockUpstream{
 		t: t, sockets: map[string]*websocket.Conn{},
 		createFailures: map[string]bool{}, createAttempts: map[string]int{}, silentKeys: map[string]bool{},
+		runErrors: map[string]string{},
 	}
 	upgrader := websocket.Upgrader{
 		CheckOrigin:  func(*http.Request) bool { return true },
@@ -330,6 +332,13 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		if m.assistantContent == "premature READY" {
 			m.prematureFetch = true
 		}
+		runError, hasRunError := m.runErrors[r.Header.Get("X-API-Key")]
+		var blocks []map[string]any
+		if hasRunError && runError != "" {
+			blocks = []map[string]any{{
+				"type": "error", "error_message": runError, "stacktrace": "sensitive stacktrace",
+			}}
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"messages": []map[string]any{
 				{
@@ -341,6 +350,7 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 				},
 				{
 					"id": "assistant-message", "todoId": "todo-1", "role": "assistant", "content": m.assistantContent,
+					"blocks": blocks,
 					"runMeta": []map[string]any{{
 						"type": "todo:msg_meta_ai", "cost": 1.25,
 						"extras": map[string]any{
@@ -356,9 +366,12 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		m.mu.Lock()
 		status := m.restTodoStatus
 		silent := m.silentKeys[r.Header.Get("X-API-Key")]
+		_, hasRunError := m.runErrors[r.Header.Get("X-API-Key")]
 		m.mu.Unlock()
 		if silent {
 			status = "RUNNING"
+		} else if hasRunError {
+			status = "ERROR"
 		}
 		if status == "" {
 			status = "RUNNING"
@@ -377,6 +390,7 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		beforeReady := m.beforeReady
 		dropWSEvents := m.dropWSEvents
 		silent := m.silentKeys[r.Header.Get("X-API-Key")]
+		_, hasRunError := m.runErrors[r.Header.Get("X-API-Key")]
 		if dropWSEvents {
 			content = m.assistantContent
 		} else if len(fragments) > 0 {
@@ -406,6 +420,15 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 			return
 		}
 		go func() {
+			if hasRunError {
+				conn.WriteJSON(map[string]any{
+					"type": "todo:status",
+					"payload": map[string]any{
+						"todoId": "todo-1", "status": "ERROR",
+					},
+				})
+				return
+			}
 			if firstResponseDelay > 0 {
 				time.Sleep(firstResponseDelay)
 			}
@@ -546,6 +569,85 @@ func TestStreamFailsOverBeforeStartingClientStream(t *testing.T) {
 	mock.mu.Unlock()
 	if badAttempts != 1 || goodAttempts != 1 {
 		t.Fatalf("create attempts: bad=%d good=%d", badAttempts, goodAttempts)
+	}
+}
+
+func TestCompleteStopsOnDeterministicUpstreamRejection(t *testing.T) {
+	mock := newMockUpstream(t)
+	const rejection = "`claude-sonnet-5` refused to answer this request (flagged as: cyber). It judged the prompt to conflict with its safety policy, so nothing was generated."
+	mock.mu.Lock()
+	mock.runErrors["first-key"] = rejection
+	mock.mu.Unlock()
+
+	cfg := &config.Config{
+		Upstream: config.UpstreamConfig{BaseURL: mock.server.URL + "/api/v1", PollTimeout: 3 * time.Second},
+		Pool: config.PoolConfig{Strategy: "round_robin", Keys: []config.AccountKey{
+			{APIKey: "first-key", ProjectID: "project-1"},
+			{APIKey: "second-key", ProjectID: "project-1"},
+		}},
+		Models: config.ModelsConfig{Default: "openai:vendor/upstream-model"},
+	}
+	p, err := pool.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := New(cfg, p, session.New())
+	_, err = gw.Complete(context.Background(), openai.ChatRequest{
+		Model: "public-model", Messages: []openai.ChatMessage{{Role: "user", Content: "hello"}},
+	})
+	if !errors.Is(err, ErrUpstreamRequestRejected) || !strings.Contains(err.Error(), rejection) {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Contains(err.Error(), "stacktrace") {
+		t.Fatalf("error exposed stacktrace: %v", err)
+	}
+	mock.mu.Lock()
+	firstAttempts := mock.createAttempts["first-key"]
+	secondAttempts := mock.createAttempts["second-key"]
+	mock.mu.Unlock()
+	if firstAttempts != 1 || secondAttempts != 0 {
+		t.Fatalf("create attempts: first=%d second=%d", firstAttempts, secondAttempts)
+	}
+	if got := p.PickExcept(map[*pool.Account]struct{}{p.At(1): {}}); got != p.At(0) {
+		t.Fatalf("rejected account was cooled down: got=%p want=%p", got, p.At(0))
+	}
+}
+
+func TestCompleteBoundsUnknownRunErrorsAndPreservesRoundRobinOrder(t *testing.T) {
+	mock := newMockUpstream(t)
+	keys := make([]config.AccountKey, 10)
+	mock.mu.Lock()
+	for i := range keys {
+		apiKey := fmt.Sprintf("key-%d", i)
+		keys[i] = config.AccountKey{APIKey: apiKey, ProjectID: "project-1"}
+		mock.runErrors[apiKey] = ""
+	}
+	mock.mu.Unlock()
+	cfg := &config.Config{
+		Upstream: config.UpstreamConfig{BaseURL: mock.server.URL + "/api/v1", PollTimeout: 3 * time.Second},
+		Pool:     config.PoolConfig{Strategy: "round_robin", Keys: keys},
+		Models:   config.ModelsConfig{Default: "openai:vendor/upstream-model"},
+	}
+	p, err := pool.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err = New(cfg, p, session.New()).Complete(context.Background(), openai.ChatRequest{
+		Model: "public-model", Messages: []openai.ChatMessage{{Role: "user", Content: "hello"}},
+	})
+	if !errors.Is(err, ErrAccountsUnavailable) || time.Since(started) > time.Second {
+		t.Fatalf("error = %v, elapsed = %s", err, time.Since(started))
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if mock.createCount != maxRunAttempts || mock.createAttempts["key-0"] != 1 || mock.createAttempts["key-1"] != 1 {
+		t.Fatalf("create attempts = %#v", mock.createAttempts)
+	}
+	for i := 2; i < len(keys); i++ {
+		if mock.createAttempts[fmt.Sprintf("key-%d", i)] != 0 {
+			t.Fatalf("unbounded create attempts = %#v", mock.createAttempts)
+		}
 	}
 }
 
@@ -720,6 +822,10 @@ func TestAccountFailurePolicy(t *testing.T) {
 			err:    fmt.Errorf("todo failed: %w", ErrUpstreamRunFailed),
 			action: accountFailureCooldown, min: time.Minute,
 		},
+		{
+			name: "deterministic rejection",
+			err:  fmt.Errorf("blocked: %w", ErrUpstreamRequestRejected),
+		},
 		{name: "network error", err: errors.New("connection reset")},
 	}
 
@@ -730,6 +836,18 @@ func TestAccountFailurePolicy(t *testing.T) {
 				t.Fatalf("action = %d, cooldown = %s", action, duration)
 			}
 		})
+	}
+}
+
+func TestLatestAssistantErrorMessagePrefersStructuredDetailAndBoundsLength(t *testing.T) {
+	message := latestAssistantErrorMessage([]upstream.Message{{
+		Role: "assistant",
+		Blocks: []upstream.Block{{
+			Type: "error", Content: "fallback", ErrorMessage: strings.Repeat("错", 600),
+		}},
+	}})
+	if len([]rune(message)) != 503 || !strings.HasSuffix(message, "...") || strings.Contains(message, "fallback") {
+		t.Fatalf("message length=%d suffix=%q", len([]rune(message)), message[len(message)-3:])
 	}
 }
 

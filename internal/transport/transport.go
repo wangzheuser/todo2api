@@ -461,6 +461,12 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 }
 
 func gatewayErrorStatus(w http.ResponseWriter, err error) int {
+	if errors.Is(err, gateway.ErrUpstreamRequestRejected) {
+		return http.StatusUnprocessableEntity
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout
+	}
 	if errors.Is(err, gateway.ErrAccountsUnavailable) {
 		w.Header().Set("Retry-After", "60")
 		return http.StatusServiceUnavailable

@@ -44,6 +44,10 @@ var ErrFirstResponseTimeout = errors.New("upstream account produced no response"
 // pooled account while preserving the original error if no fallback exists.
 var ErrUpstreamRunFailed = errors.New("upstream todo run failed")
 
+// ErrUpstreamRequestRejected means the request itself failed deterministically
+// and must not be retried with another account.
+var ErrUpstreamRequestRejected = errors.New("upstream request rejected")
+
 // ErrEmptyCompletion means the upstream reported a completed run but did not
 // expose either assistant text or authoritative usage metadata. Treating this
 // as success makes clients observe an empty answer (and usage=0), so new
@@ -268,11 +272,18 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 		}
 	} else {
 		excluded := make(map[*pool.Account]struct{})
-		for {
+		var lastRunErr error
+		runAttempts := 0
+		runCompleted := false
+		for runAttempts < maxRunAttempts {
 			acc, runtime, sub, todoID, err = g.startNewConversationExcept(runCtx, req, runnerModel, excluded)
 			if err != nil {
+				if lastRunErr != nil && errors.Is(err, ErrAccountsUnavailable) {
+					return nil, fmt.Errorf("%w after %d run attempts: %v", ErrAccountsUnavailable, runAttempts, lastRunErr)
+				}
 				return nil, err
 			}
+			runAttempts++
 			if todoID == "" {
 				sub.Close()
 				acc.Release()
@@ -311,6 +322,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				}
 				defer acc.Release()
 				defer sub.Close()
+				runCompleted = true
 				break
 			}
 
@@ -332,6 +344,15 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				return nil, failure
 			}
 			action, cooldown := accountFailurePolicy(failure)
+			classification := "run_failed"
+			if errors.Is(failure, ErrUpstreamRequestRejected) {
+				classification = "request_rejected"
+			}
+			log.Printf(
+				"upstream run attempt %d/%d account %d todo %s model %s classification=%s retryable=%t: %v",
+				runAttempts, maxRunAttempts, g.pool.IndexOf(acc)+1, todoID, runnerModel,
+				classification, action != accountFailureNone, failure,
+			)
 			if action == accountFailureNone {
 				return nil, failure
 			}
@@ -339,12 +360,13 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				return nil, handleErr
 			}
 			excluded[acc] = struct{}{}
-			if g.pool.PickExcept(excluded) == nil {
-				if empty {
-					return nil, fmt.Errorf("%w; no fallback account was available", failure)
-				}
-				return nil, fmt.Errorf("%w: %v", ErrAccountsUnavailable, failure)
-			}
+			lastRunErr = failure
+		}
+		if !runCompleted && lastRunErr != nil {
+			return nil, fmt.Errorf("%w after %d run attempts: %v", ErrAccountsUnavailable, runAttempts, lastRunErr)
+		}
+		if !runCompleted {
+			return nil, ErrAccountsUnavailable
 		}
 	}
 	if todoID == "" {
@@ -533,9 +555,15 @@ const (
 )
 
 // Keep failover bounded during provider-wide outages.
-const maxNewConversationAttempts = 8
+const (
+	maxNewConversationAttempts = 8
+	maxRunAttempts             = 2
+)
 
 func accountFailurePolicy(err error) (accountFailureAction, time.Duration) {
+	if errors.Is(err, ErrUpstreamRequestRejected) {
+		return accountFailureNone, 0
+	}
 	if errors.Is(err, ErrFirstResponseTimeout) {
 		return accountFailureCooldown, 10 * time.Minute
 	}
@@ -831,7 +859,7 @@ func (g *Gateway) waitAssistant(
 					}
 					return finishAssistant(ctx, cli, todoID, previousAssistantSignature, buf.String(), &filter, emit)
 				case "CANCELLED", "CANCELLED_CHECKED", "ERROR", "ERROR_CHECKED":
-					return assistantResult{}, fmt.Errorf("%w: todo %s ended with status %s", ErrUpstreamRunFailed, todoID, payload.Status)
+					return assistantResult{}, terminalRunError(ctx, cli, todoID, payload.Status)
 				}
 			}
 		case err := <-errc:
@@ -858,7 +886,7 @@ func (g *Gateway) waitAssistant(
 				}
 				return finishAssistant(ctx, cli, todoID, previousAssistantSignature, buf.String(), &filter, emit)
 			case "CANCELLED", "CANCELLED_CHECKED", "ERROR", "ERROR_CHECKED":
-				return assistantResult{}, fmt.Errorf("%w: todo %s ended with status %s", ErrUpstreamRunFailed, todoID, status)
+				return assistantResult{}, terminalRunError(ctx, cli, todoID, status)
 			}
 		case <-firstResponseTimer.C:
 			if buf.Len() == 0 {
@@ -902,6 +930,71 @@ func todoStatus(ctx context.Context, cli *upstream.Client, todoID string) (strin
 		return "", err
 	}
 	return strings.ToUpper(todo.Status), nil
+}
+
+// terminalRunError preserves the latest sanitized upstream error detail.
+func terminalRunError(ctx context.Context, cli *upstream.Client, todoID, status string) error {
+	base := fmt.Errorf("%w: todo %s ended with status %s", ErrUpstreamRunFailed, todoID, status)
+	detailCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	messages, err := cli.Messages(detailCtx, todoID)
+	if err != nil {
+		return base
+	}
+	message := latestAssistantErrorMessage(messages)
+	if message == "" {
+		return base
+	}
+	if deterministicRunError(message) {
+		return fmt.Errorf("%w: %s", ErrUpstreamRequestRejected, message)
+	}
+	return fmt.Errorf("%w: todo %s ended with status %s: %s", ErrUpstreamRunFailed, todoID, status, message)
+}
+
+// latestAssistantErrorMessage returns only the newest assistant error block.
+func latestAssistantErrorMessage(messages []upstream.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "assistant" {
+			continue
+		}
+		for j := len(messages[i].Blocks) - 1; j >= 0; j-- {
+			block := messages[i].Blocks[j]
+			if block.Type != "error" {
+				continue
+			}
+			message := strings.TrimSpace(block.ErrorMessage)
+			if message == "" {
+				message = strings.TrimSpace(block.Content)
+			}
+			return truncateRunError(message)
+		}
+		return ""
+	}
+	return ""
+}
+
+// deterministicRunError identifies failures that switching accounts cannot fix.
+func deterministicRunError(message string) bool {
+	detail := strings.ToLower(message)
+	for _, marker := range []string{
+		"refused to answer", "flagged as:", "safety policy", "nothing was generated",
+		"invalid request", "context length", "unsupported parameter",
+	} {
+		if strings.Contains(detail, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateRunError bounds client-visible upstream detail without splitting UTF-8.
+func truncateRunError(message string) string {
+	const limit = 500
+	runes := []rune(message)
+	if len(runes) <= limit {
+		return message
+	}
+	return string(runes[:limit]) + "..."
 }
 
 type assistantResult struct {

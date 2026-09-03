@@ -170,6 +170,32 @@ func TestGatewayUnavailableMapsToRetryable503(t *testing.T) {
 	}
 }
 
+func TestChatMapsDeterministicRejectionTo422(t *testing.T) {
+	gw := &recordingGateway{err: fmt.Errorf("%w: claude-sonnet-5 refused to answer this request", gateway.ErrUpstreamRequestRejected)}
+	handler := (&Server{
+		cfg: &config.Config{Server: config.ServerConfig{ClientTokens: []string{"client-key"}}},
+		gw:  gw,
+	}).Handler()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}]
+	}`))
+	request.Header.Set("Authorization", "Bearer client-key")
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "refused to answer") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGatewayDeadlineMapsTo504(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeGatewayErr(recorder, fmt.Errorf("timed out waiting for assistant reply: %w", context.DeadlineExceeded))
+	if recorder.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", recorder.Code)
+	}
+}
+
 func TestAuthNeverAcceptsEmptyConfiguredToken(t *testing.T) {
 	s := &Server{cfg: &config.Config{Server: config.ServerConfig{ClientTokens: []string{""}}}}
 	called := false

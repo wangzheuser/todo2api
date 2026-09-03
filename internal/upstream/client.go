@@ -61,10 +61,11 @@ func newHTTPError(method, path string, statusCode int, data []byte) *HTTPError {
 
 // Block is a message content block (text / tool / bash ...).
 type Block struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Result  string `json:"result"`
-	Status  string `json:"status"`
+	Type         string `json:"type"`
+	Content      string `json:"content"`
+	Result       string `json:"result"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message"`
 }
 
 // AttachmentFrame is the metadata reference accepted by todo requests.
