@@ -551,6 +551,30 @@ class RegistrationFlowTest(unittest.TestCase):
         self.assertEqual(100, waited)
         sleep.assert_called_once_with(100)
 
+    def test_rate_limit_cooldown_escalates_and_resets_on_success(self) -> None:
+        """验证连续 429 指数退避、成功后复位，且不低于配置的基础冷却。"""
+        gate = main.RequestIntervalGate(40)
+        expected_cooldowns = (15.0, 30.0, 60.0, 120.0, 240.0, 480.0, 600.0)
+        for streak, expected in enumerate(expected_cooldowns, start=1):
+            cooldown, actual_streak = gate.note_rate_limited(0.0, 15.0)
+            self.assertEqual(expected, cooldown)
+            self.assertEqual(streak, actual_streak)
+        gate.note_send_success()
+        cooldown, streak = gate.note_rate_limited(0.0, 15.0)
+        self.assertEqual(15.0, cooldown)
+        self.assertEqual(1, streak)
+
+    def test_rate_limit_cooldown_respects_base_and_retry_after(self) -> None:
+        """验证退避封顶不会削减更大的基础冷却，Retry-After 优先。"""
+        gate = main.RequestIntervalGate(40)
+        cooldown, _ = gate.note_rate_limited(0.0, 3600.0)
+        self.assertEqual(3600.0, cooldown)
+        cooldown, _ = gate.note_rate_limited(0.0, 3600.0)
+        self.assertEqual(3600.0, cooldown)
+        gate2 = main.RequestIntervalGate(40)
+        cooldown, _ = gate2.note_rate_limited(120.0, 15.0)
+        self.assertEqual(120.0, cooldown)
+
     def test_concurrent_failures_are_replaced_until_success_target(self) -> None:
         """验证失败任务会补位，且在途任务不会超过剩余成功数。"""
         calls: list[int] = []
@@ -781,6 +805,7 @@ class RegistrationFlowTest(unittest.TestCase):
         _RateLimitThenSuccessTodoforAI.instances = 0
         otp_gate = Mock()
         otp_gate.wait.return_value = 0
+        otp_gate.note_rate_limited.return_value = (600, 1)
 
         with patch.object(main, "TodoforAI", _RateLimitThenSuccessTodoforAI), patch.object(
             main.time, "sleep"

@@ -70,6 +70,10 @@ PRINT_LOCK = threading.Lock()
 REJECTED_DOMAIN_LOCK = threading.Lock()
 
 
+class MailboxRefreshNeeded(RuntimeError):
+    """排队或冷却时间过长，需要重建邮箱/浏览器令牌后再继续（非错误）。"""
+
+
 class RequestIntervalGate:
     """在线程间将目标请求按固定最小间隔排队。"""
 
@@ -77,6 +81,8 @@ class RequestIntervalGate:
         self.interval_seconds = max(0.0, float(interval_seconds))
         self.next_allowed = 0.0
         self.cooldown_until = 0.0
+        self.rate_limit_streak = 0
+        self.rate_limit_max_cooldown = 600.0
         self.lock = threading.Lock()
 
     def wait_for_cooldown(self) -> float:
@@ -105,6 +111,24 @@ class RequestIntervalGate:
                 self.cooldown_until,
                 time.monotonic() + max(0.0, float(seconds)),
             )
+
+    def note_rate_limited(self, retry_after: float, base_cooldown: float) -> tuple[float, int]:
+        """记录一次目标限速，返回本次应冷却的秒数和连续限速次数。
+
+        无 Retry-After 时按 base_cooldown 指数递增（封顶 rate_limit_max_cooldown），
+        结果不会低于调用方配置的 base_cooldown。
+        """
+        with self.lock:
+            self.rate_limit_streak += 1
+            escalated = min(
+                base_cooldown * (2 ** (self.rate_limit_streak - 1)),
+                self.rate_limit_max_cooldown,
+            ) if base_cooldown > 0 else 0.0
+            return max(float(retry_after), base_cooldown, escalated), self.rate_limit_streak
+
+    def note_send_success(self) -> None:
+        with self.lock:
+            self.rate_limit_streak = 0
 
 
 class CloudAccountSync:
@@ -917,6 +941,7 @@ def process_one_account(
     otp_cooldown_seconds: float = 3600,
     network_gate: RequestIntervalGate | None = None,
     network_cooldown_seconds: float = 60,
+    gate_stale_seconds: float = 180,
     max_retries: int = 5,
     proxy_attempts: int = 5,
     initial_delay: float = 0,
@@ -996,8 +1021,8 @@ def process_one_account(
             log(thread_id, "📤 发送 OTP...")
             solve_first = turnstile_mode == "always" and turnstile_solver is not None
             if not solve_first and otp_gate:
-                if otp_gate.wait() > 60:
-                    raise RuntimeError("OTP 冷却结束，重新创建邮箱以避免会话过期")
+                if otp_gate.wait() > gate_stale_seconds:
+                    raise MailboxRefreshNeeded("OTP 排队时间过长，重新创建邮箱以避免会话过期")
             otp_sent = False if solve_first else todo.send_otp(email)
             needs_browser = solve_first or (
                 not otp_sent
@@ -1020,16 +1045,16 @@ def process_one_account(
                             if solve_first
                             else "🧩 目标要求浏览器验证，获取令牌后重试...",
                         )
-                        if otp_gate and otp_gate.wait_for_cooldown() > 60:
-                            challenge_error = RuntimeError(
-                                "全局冷却结束，重新创建邮箱以避免会话过期"
+                        if otp_gate and otp_gate.wait_for_cooldown() > gate_stale_seconds:
+                            challenge_error = MailboxRefreshNeeded(
+                                "全局冷却时间过长，重新创建邮箱以避免会话过期"
                             )
                             break
                         captcha_token = turnstile_solver(candidate.proxy_url)
                         if otp_gate:
-                            if otp_gate.wait() > 60:
-                                challenge_error = RuntimeError(
-                                    "OTP 冷却结束，重新创建邮箱和浏览器令牌"
+                            if otp_gate.wait() > gate_stale_seconds:
+                                challenge_error = MailboxRefreshNeeded(
+                                    "OTP 排队时间过长，重新创建邮箱和浏览器令牌"
                                 )
                                 break
                         otp_sent = candidate.send_otp(email, captcha_token)
@@ -1060,6 +1085,9 @@ def process_one_account(
                 if challenge_error is not None:
                     raise challenge_error
 
+            if otp_sent and otp_gate:
+                otp_gate.note_send_success()
+
             if not otp_sent:
                 error_code = str(getattr(todo, "last_otp_error_code", "") or "UNKNOWN")
                 error_message = str(getattr(todo, "last_otp_error_message", "") or "OTP 发送失败")
@@ -1082,17 +1110,24 @@ def process_one_account(
                     return None
 
                 if getattr(todo, "last_otp_status", 0) == 429:
-                    cooldown_seconds = max(
-                        otp_cooldown_seconds,
-                        float(getattr(todo, "last_otp_retry_after", 0) or 0),
-                    )
                     if otp_gate:
+                        cooldown_seconds, rate_limit_streak = otp_gate.note_rate_limited(
+                            float(getattr(todo, "last_otp_retry_after", 0) or 0),
+                            max(otp_cooldown_seconds, 0.0),
+                        )
                         otp_gate.defer(cooldown_seconds)
+                    else:
+                        cooldown_seconds = max(
+                            otp_cooldown_seconds,
+                            float(getattr(todo, "last_otp_retry_after", 0) or 0),
+                        )
+                        rate_limit_streak = 1
                     if attempt < max_retries:
                         if cooldown_seconds > 0:
                             log(
                                 thread_id,
-                                f"   目标接口限速，全局冷却 {cooldown_seconds:g}s 后重试"
+                                f"   目标接口限速（连续第 {rate_limit_streak} 次），"
+                                f"全局冷却 {cooldown_seconds:g}s 后重试"
                                 f"；响应头: {getattr(todo, 'last_otp_rate_limit_headers', {})}",
                             )
                         else:
@@ -1200,6 +1235,12 @@ def process_one_account(
             log(thread_id, f"✅ 完成! Keys: {key_count} 个, 首个: {key_preview}")
             return result
 
+        except MailboxRefreshNeeded as e:
+            if attempt < max_retries:
+                log(thread_id, f"⏳ {e}（尝试 {attempt}/{max_retries}，继续下一轮）")
+                continue
+            log(thread_id, f"❌ 重试次数耗尽: {e}")
+            return None
         except requests.RequestException as e:
             log(thread_id, f"❌ 网络异常 (尝试 {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
@@ -1578,6 +1619,9 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
 
     workers = min(args.threads, args.count)
 
+    # 邮箱重建阈值须大于正常排队时间（间隔×线程数），否则并发线程会反复丢弃刚建好的邮箱。
+    gate_stale_seconds = max(120.0, otp_interval * workers + 60.0)
+
     def registration_worker(task_id: int, initial_delay: float = 0) -> dict | None:
         return process_one_account(
             task_id,
@@ -1592,6 +1636,7 @@ MailPoolHub 配置优先级: 命令行 > 环境变量 > config.json > 本机默�
             otp_cooldown_seconds=otp_cooldown,
             network_gate=network_gate,
             network_cooldown_seconds=network_cooldown,
+            gate_stale_seconds=gate_stale_seconds,
             max_retries=args.max_retries,
             initial_delay=initial_delay,
             verbose=args.verbose,
