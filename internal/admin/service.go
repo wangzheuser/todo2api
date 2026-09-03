@@ -85,6 +85,10 @@ type apiAccount struct {
 	LastError        string     `json:"last_error,omitempty"`
 }
 
+type poolSettingsResponse struct {
+	MaxActiveAccounts int `json:"max_active_accounts"`
+}
+
 func New(cfg *config.Config, store *storage.Store, p *pool.Pool, contexts ...context.Context) *Service {
 	ctx := context.Background()
 	if len(contexts) > 0 && contexts[0] != nil {
@@ -118,12 +122,49 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/logout", s.requireAuth(s.sameOrigin(s.handleLogout)))
 	mux.HandleFunc("/api/accounts", s.requireAuth(s.sameOrigin(s.handleAccounts)))
 	mux.HandleFunc("/api/accounts/bulk", s.requireAuth(s.sameOrigin(s.handleBulkAccounts)))
+	mux.HandleFunc("/api/accounts/settings", s.requireAuth(s.sameOrigin(s.handlePoolSettings)))
 	mux.HandleFunc("/api/accounts/", s.requireAuth(s.sameOrigin(s.handleAccount)))
 	mux.HandleFunc("/api/stats", s.requireAuth(s.handleStats))
 	mux.HandleFunc("/api/stats/models", s.requireAuth(s.handleModelStats))
 	mux.HandleFunc("/api/models", s.requireAuth(s.handleModels))
 	mux.HandleFunc("/api/models/refresh", s.requireAuth(s.sameOrigin(s.handleModelRefresh)))
 	mux.HandleFunc("/api/events", s.requireAuth(s.handleEvents))
+}
+
+// handlePoolSettings reads or updates the live load-balancing window.
+func (s *Service) handlePoolSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, poolSettingsResponse{MaxActiveAccounts: s.pool.MaxActiveAccounts()})
+	case http.MethodPut:
+		var request poolSettingsResponse
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, "max_active_accounts must be an integer")
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeError(w, http.StatusBadRequest, "request must contain one JSON object")
+			return
+		}
+		if request.MaxActiveAccounts < 1 {
+			writeError(w, http.StatusBadRequest, "max_active_accounts must be at least 1")
+			return
+		}
+		if err := s.store.SetPoolMaxActiveAccounts(r.Context(), request.MaxActiveAccounts); err != nil {
+			writeError(w, http.StatusInternalServerError, "save pool settings failed")
+			return
+		}
+		if err := s.pool.SetMaxActiveAccounts(request.MaxActiveAccounts); err != nil {
+			writeError(w, http.StatusInternalServerError, "apply pool settings failed")
+			return
+		}
+		s.hub.publish("accounts")
+		writeJSON(w, http.StatusOK, poolSettingsResponse{MaxActiveAccounts: s.pool.MaxActiveAccounts()})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // handleModels returns the pricing catalog with current account-pool availability.

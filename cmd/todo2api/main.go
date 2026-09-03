@@ -48,10 +48,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("pool: %v", err)
 	}
+	maxActiveAccounts, err := store.PoolMaxActiveAccounts(ctx)
+	if err != nil {
+		log.Fatalf("load pool settings: %v", err)
+	}
+	if err := p.SetMaxActiveAccounts(maxActiveAccounts); err != nil {
+		log.Fatalf("apply pool settings: %v", err)
+	}
 	for _, warning := range p.Warnings() {
 		log.Printf("pool warning: %v", warning)
 	}
 	log.Printf("initialized %d of %d upstream accounts", p.Len(), p.Configured())
+	log.Printf("load balancing uses at most %d active accounts", p.MaxActiveAccounts())
 	log.Printf("discovered %d common upstream models", len(p.Models()))
 
 	sess := session.New()

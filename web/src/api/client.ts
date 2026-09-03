@@ -3,6 +3,7 @@ import type {
   DashboardStats,
   ModelCatalogResponse,
   ModelStatsResponse,
+  PoolSettings,
 } from "@/types";
 
 const BASE = "/api";
@@ -78,6 +79,17 @@ export const api = {
 
   getAccounts(): Promise<Account[]> {
     return apiFetch<Account[]>("/accounts");
+  },
+
+  getPoolSettings(): Promise<PoolSettings> {
+    return apiFetch<PoolSettings>("/accounts/settings");
+  },
+
+  updatePoolSettings(maxActiveAccounts: number): Promise<PoolSettings> {
+    return apiFetch<PoolSettings>("/accounts/settings", {
+      method: "PUT",
+      body: JSON.stringify({ max_active_accounts: maxActiveAccounts }),
+    });
   },
 
   reloadAccounts(accountIds?: number[]): Promise<{ status: string }> {

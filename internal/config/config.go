@@ -20,6 +20,8 @@ const (
 	defaultPollTimeout = 5 * time.Minute
 	defaultStoragePath = "data/todo2api.db"
 	defaultSessionTTL  = 12 * time.Hour
+	// DefaultPoolMaxActiveAccounts bounds the default load-balancing window.
+	DefaultPoolMaxActiveAccounts = 5
 )
 
 type Config struct {

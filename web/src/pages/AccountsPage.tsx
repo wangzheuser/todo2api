@@ -12,10 +12,11 @@ import {
   ChevronRight,
   CheckCircle2,
   Power,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/api/client";
-import type { Account, ReloadProgressResponse } from "@/types";
+import type { Account, PoolSettings, ReloadProgressResponse } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -271,6 +272,10 @@ type PageSize = (typeof PAGE_SIZES)[number];
 export function AccountsPage() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [poolSettings, setPoolSettings] = useState<PoolSettings | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [maxActiveDraft, setMaxActiveDraft] = useState("5");
   const [reloading, setReloading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -334,14 +339,46 @@ export function AccountsPage() {
 
   async function load() {
     try {
-      const data = await api.getAccounts();
-      setAccounts(data);
+      const [accountData, settings] = await Promise.all([
+        api.getAccounts(),
+        api.getPoolSettings(),
+      ]);
+      setAccounts(accountData);
+      setPoolSettings(settings);
     } catch (err) {
       if (err instanceof Error && err.message === "Unauthorized") {
         navigate("/login", { replace: true });
       } else {
         toast.error("加载账号列表失败");
       }
+    }
+  }
+
+  /** openPoolSettings copies the current value into the editable field. */
+  function openPoolSettings() {
+    setMaxActiveDraft(String(poolSettings?.max_active_accounts ?? 5));
+    setSettingsOpen(true);
+  }
+
+  /** savePoolSettings persists the limit and applies it to new requests. */
+  async function savePoolSettings(event: React.FormEvent) {
+    event.preventDefault();
+    const value = Number(maxActiveDraft);
+    if (!Number.isInteger(value) || value < 1) {
+      toast.error("最大可用账号数必须是大于等于 1 的整数");
+      return;
+    }
+    setSettingsSaving(true);
+    try {
+      const settings = await api.updatePoolSettings(value);
+      setPoolSettings(settings);
+      setMaxActiveDraft(String(settings.max_active_accounts));
+      setSettingsOpen(false);
+      toast.success(`负载均衡账号数已更新为 ${settings.max_active_accounts}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存负载均衡设置失败");
+    } finally {
+      setSettingsSaving(false);
     }
   }
 
@@ -614,6 +651,48 @@ export function AccountsPage() {
   return (
     <div className="p-4 md:p-8">
       <Dialog
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          if (!settingsSaving) setSettingsOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>负载均衡设置</DialogTitle>
+            <DialogDescription>
+              最多让指定数量的当前可用账号参与负载均衡；账号冷却或禁用后，后续账号会自动补位。
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={savePoolSettings} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="max-active-accounts">最大可用账号数量</Label>
+              <Input
+                id="max-active-accounts"
+                type="number"
+                min={1}
+                step={1}
+                value={maxActiveDraft}
+                onChange={(event) => setMaxActiveDraft(event.target.value)}
+                disabled={settingsSaving}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={settingsSaving}>
+                {settingsSaving ? (
+                  <>
+                    <Loader2 className="animate-spin" size={14} />
+                    保存中…
+                  </>
+                ) : (
+                  "保存"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
         open={addOpen}
         onOpenChange={(open) => {
           if (!adding) setAddOpen(open);
@@ -842,6 +921,16 @@ export function AccountsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={openPoolSettings}
+            disabled={poolSettings === null}
+          >
+            <SlidersHorizontal size={14} />
+            负载均衡：{poolSettings?.max_active_accounts ?? "—"} 个
+          </Button>
           <Button
             variant="outline"
             size="sm"

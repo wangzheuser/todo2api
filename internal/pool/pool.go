@@ -163,7 +163,9 @@ type Pool struct {
 	accounts             []*Account
 	configured           []*Account
 	strategy             string
-	rr                   uint64
+	selectionMu          sync.Mutex
+	lastSelected         *Account
+	maxActiveAccounts    atomic.Int64
 	mu                   sync.Mutex // serializes Warm progress and ReloadKeys planning
 	reconcileMu          sync.Mutex
 	readyMu              sync.RWMutex
@@ -218,6 +220,7 @@ type accountInitResult struct {
 
 func New(cfg *config.Config, repositories ...AccountRepository) (*Pool, error) {
 	p := &Pool{strategy: cfg.Pool.Strategy, cfg: cfg}
+	p.maxActiveAccounts.Store(config.DefaultPoolMaxActiveAccounts)
 	if len(repositories) > 0 {
 		p.repo = repositories[0]
 	}
@@ -534,6 +537,27 @@ func (p *Pool) Configured() int {
 		}
 	}
 	return n
+}
+
+// MaxActiveAccounts returns the maximum load-balancing window size.
+func (p *Pool) MaxActiveAccounts() int {
+	value := p.maxActiveAccounts.Load()
+	if value < 1 {
+		return config.DefaultPoolMaxActiveAccounts
+	}
+	return int(value)
+}
+
+// SetMaxActiveAccounts updates the load-balancing window for subsequent picks.
+func (p *Pool) SetMaxActiveAccounts(value int) error {
+	if value < 1 {
+		return fmt.Errorf("pool max active accounts must be at least 1")
+	}
+	p.maxActiveAccounts.Store(int64(value))
+	p.selectionMu.Lock()
+	p.lastSelected = nil
+	p.selectionMu.Unlock()
+	return nil
 }
 
 // Warm initializes the remaining configured accounts in bounded background
@@ -1026,22 +1050,46 @@ func (p *Pool) Pick() *Account {
 func (p *Pool) PickExcept(excluded map[*Account]struct{}) *Account {
 	p.readyMu.RLock()
 	defer p.readyMu.RUnlock()
-	if len(p.accounts) == 0 {
+	now := time.Now().UnixNano()
+	limit := p.MaxActiveAccounts()
+	accounts := make([]*Account, 0, min(limit, len(p.accounts)))
+	for _, account := range p.accounts {
+		if account != nil && account.available(now) {
+			accounts = append(accounts, account)
+			if len(accounts) == limit {
+				break
+			}
+		}
+	}
+	if len(accounts) == 0 {
 		return nil
 	}
-	start := int((atomic.AddUint64(&p.rr, 1) - 1) % uint64(len(p.accounts)))
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
+	start := 0
+	for i, account := range accounts {
+		if account == p.lastSelected {
+			start = (i + 1) % len(accounts)
+			break
+		}
+	}
+	var selected *Account
 	switch p.strategy {
 	case "least_busy":
-		return p.leastBusy(start, excluded)
+		selected = p.leastBusy(accounts, start, excluded)
 	default:
-		return p.roundRobin(start, excluded)
+		selected = p.roundRobin(accounts, start, excluded)
 	}
+	if selected != nil {
+		p.lastSelected = selected
+	}
+	return selected
 }
 
-func (p *Pool) roundRobin(start int, excluded map[*Account]struct{}) *Account {
+func (p *Pool) roundRobin(accounts []*Account, start int, excluded map[*Account]struct{}) *Account {
 	now := time.Now().UnixNano()
-	for offset := range p.accounts {
-		account := p.accounts[(start+offset)%len(p.accounts)]
+	for offset := range accounts {
+		account := accounts[(start+offset)%len(accounts)]
 		if _, skip := excluded[account]; !skip && account.available(now) {
 			return account
 		}
@@ -1049,11 +1097,11 @@ func (p *Pool) roundRobin(start int, excluded map[*Account]struct{}) *Account {
 	return nil
 }
 
-func (p *Pool) leastBusy(start int, excluded map[*Account]struct{}) *Account {
+func (p *Pool) leastBusy(accounts []*Account, start int, excluded map[*Account]struct{}) *Account {
 	now := time.Now().UnixNano()
 	var best *Account
-	for offset := range p.accounts {
-		account := p.accounts[(start+offset)%len(p.accounts)]
+	for offset := range accounts {
+		account := accounts[(start+offset)%len(accounts)]
 		if _, skip := excluded[account]; skip || !account.available(now) {
 			continue
 		}

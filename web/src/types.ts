@@ -16,6 +16,10 @@ export interface Account {
   disabled_until?: string;
 }
 
+export interface PoolSettings {
+  max_active_accounts: number;
+}
+
 export interface DashboardStats {
   account_count: number;
   active_count: number;

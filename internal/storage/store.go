@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 const (
 	legacyMigrationKey = "legacy_keys_imported"
 	masterVerifierKey  = "master_key_verifier"
+	poolMaxActiveKey   = "pool_max_active_accounts"
 )
 
 type schemaMigration struct {
@@ -297,6 +299,36 @@ func (s *Store) verifyMasterKey(ctx context.Context, master []byte) error {
 	}
 	if !hmac.Equal([]byte(got), []byte(want)) {
 		return fmt.Errorf("storage.master_key does not match this database")
+	}
+	return nil
+}
+
+// PoolMaxActiveAccounts returns the persisted load-balancing window size.
+func (s *Store) PoolMaxActiveAccounts(ctx context.Context) (int, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key=?`, poolMaxActiveKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return config.DefaultPoolMaxActiveAccounts, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read pool max active accounts: %w", err)
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, fmt.Errorf("invalid persisted pool max active accounts %q", raw)
+	}
+	return value, nil
+}
+
+// SetPoolMaxActiveAccounts persists the load-balancing window size.
+func (s *Store) SetPoolMaxActiveAccounts(ctx context.Context, value int) error {
+	if value < 1 {
+		return fmt.Errorf("pool max active accounts must be at least 1")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO metadata(key,value) VALUES(?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, poolMaxActiveKey, strconv.Itoa(value))
+	if err != nil {
+		return fmt.Errorf("save pool max active accounts: %w", err)
 	}
 	return nil
 }

@@ -93,6 +93,71 @@ func TestModelsCatalogRequiresLoginAndReturnsStaticModels(t *testing.T) {
 	}
 }
 
+func TestPoolSettingsRequireLoginPersistAndApplyImmediately(t *testing.T) {
+	service, mux, store := testService(t)
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/api/accounts/settings", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", recorder.Code)
+	}
+
+	cookie := login(t, mux)
+	request = httptest.NewRequest(http.MethodGet, "http://example.test/api/accounts/settings", nil)
+	request.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"max_active_accounts":5`) {
+		t.Fatalf("default settings status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "http://example.test/api/accounts/settings", strings.NewReader(`{"max_active_accounts":2}`))
+	request.AddCookie(cookie)
+	request.Header.Set("Origin", "http://example.test")
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.pool.MaxActiveAccounts() != 2 {
+		t.Fatalf("update status=%d pool=%d body=%s", recorder.Code, service.pool.MaxActiveAccounts(), recorder.Body.String())
+	}
+	if value, err := store.PoolMaxActiveAccounts(context.Background()); err != nil || value != 2 {
+		t.Fatalf("stored value=%d err=%v", value, err)
+	}
+
+	for name, body := range map[string]string{
+		"zero":          `{"max_active_accounts":0}`,
+		"fraction":      `{"max_active_accounts":1.5}`,
+		"unknown field": `{"max_active_accounts":3,"other":true}`,
+		"trailing JSON": `{"max_active_accounts":3}{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPut, "http://example.test/api/accounts/settings", strings.NewReader(body))
+			request.AddCookie(cookie)
+			request.Header.Set("Origin", "http://example.test")
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestPoolSettingsStorageFailureKeepsRuntimeValue(t *testing.T) {
+	service, _, store := testService(t)
+	if err := service.pool.SetMaxActiveAccounts(4); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPut, "http://example.test/api/accounts/settings", strings.NewReader(`{"max_active_accounts":2}`))
+	recorder := httptest.NewRecorder()
+	service.handlePoolSettings(recorder, request)
+	if recorder.Code != http.StatusInternalServerError || service.pool.MaxActiveAccounts() != 4 {
+		t.Fatalf("status=%d pool=%d body=%s", recorder.Code, service.pool.MaxActiveAccounts(), recorder.Body.String())
+	}
+}
+
 func TestModelRefreshEndpointUpdatesCatalogAndPreservesLastGoodModels(t *testing.T) {
 	var state atomic.Value
 	state.Store("before")

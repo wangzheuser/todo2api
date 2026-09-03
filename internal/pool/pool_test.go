@@ -61,6 +61,53 @@ func TestRoundRobinAcrossAccounts(t *testing.T) {
 	}
 }
 
+func TestPickUsesDynamicMaxActiveAccountWindow(t *testing.T) {
+	accounts := make([]*Account, 7)
+	for i := range accounts {
+		accounts[i] = &Account{ProjectID: fmt.Sprintf("project-%d", i+1)}
+	}
+	p := &Pool{accounts: accounts, strategy: "round_robin"}
+	for i := 0; i < 10; i++ {
+		if got := p.Pick(); got != accounts[i%config.DefaultPoolMaxActiveAccounts] {
+			t.Fatalf("default pick %d = %p", i, got)
+		}
+	}
+	if err := p.SetMaxActiveAccounts(2); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if got := p.Pick(); got != accounts[i%2] {
+			t.Fatalf("limited pick %d = %p", i, got)
+		}
+	}
+	accounts[0].CoolDown(time.Hour)
+	if err := p.SetMaxActiveAccounts(5); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if got := p.Pick(); got != accounts[i+1] {
+			t.Fatalf("replacement pick %d = %p, want %p", i, got, accounts[i+1])
+		}
+	}
+	if err := p.SetMaxActiveAccounts(0); err == nil {
+		t.Fatal("zero max active accounts was accepted")
+	}
+}
+
+func TestLeastBusyStaysWithinActiveWindow(t *testing.T) {
+	accounts := make([]*Account, 6)
+	for i := range accounts {
+		accounts[i] = &Account{ProjectID: fmt.Sprintf("project-%d", i+1)}
+		if i < 4 {
+			accounts[i].Acquire()
+		}
+	}
+	p := &Pool{accounts: accounts, strategy: "least_busy"}
+	if got := p.Pick(); got != accounts[4] {
+		t.Fatalf("least busy pick = %p, want window account %p", got, accounts[4])
+	}
+}
+
 func TestLeastBusySkipsAccountInFlight(t *testing.T) {
 	first := &Account{ProjectID: "project-1"}
 	second := &Account{ProjectID: "project-2"}

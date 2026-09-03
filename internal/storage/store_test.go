@@ -86,6 +86,43 @@ func TestEncryptedLegacyImportRunsOnce(t *testing.T) {
 	}
 }
 
+func TestPoolMaxActiveAccountsDefaultsAndPersists(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	cfg := testConfig(t, dir)
+	store, err := Open(ctx, cfg, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, err := store.PoolMaxActiveAccounts(ctx); err != nil || value != config.DefaultPoolMaxActiveAccounts {
+		t.Fatalf("default value=%d err=%v", value, err)
+	}
+	if err := store.SetPoolMaxActiveAccounts(ctx, 8); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPoolMaxActiveAccounts(ctx, 0); err == nil {
+		t.Fatal("zero max active accounts was accepted")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = Open(ctx, cfg, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if value, err := store.PoolMaxActiveAccounts(ctx); err != nil || value != 8 {
+		t.Fatalf("persisted value=%d err=%v", value, err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value='broken' WHERE key=?`, poolMaxActiveKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PoolMaxActiveAccounts(ctx); err == nil {
+		t.Fatal("corrupt max active accounts was accepted")
+	}
+}
+
 func TestWrongMasterKeyFails(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
