@@ -267,12 +267,13 @@ export function ModelsPage() {
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1460px]">
+          <Table className="min-w-[1620px]">
             <TableHeader>
               <TableRow>
                 <TableHead>模型</TableHead>
                 <TableHead>计费渠道</TableHead>
                 <TableHead>状态</TableHead>
+                <TableHead>免费账号</TableHead>
                 <TableHead className="text-right">上下文</TableHead>
                 <TableHead className="text-right">最大输出</TableHead>
                 <TableHead className="text-right">输入原价</TableHead>
@@ -312,6 +313,15 @@ export function ModelsPage() {
                           ] ?? "不可用"}
                         </div>
                       </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {model.free_account_callable ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/15">
+                        免费账号可调用
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">免费账号不可调用</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right font-mono">

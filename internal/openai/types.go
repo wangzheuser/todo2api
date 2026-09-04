@@ -194,6 +194,7 @@ type Model struct {
 	Name                string `json:"name,omitempty"`
 	ContextLength       int64  `json:"context_length,omitempty"`
 	MaxCompletionTokens int64  `json:"max_completion_tokens,omitempty"`
+	FreeAccountCallable bool   `json:"free_account_callable"`
 }
 
 type APIError struct {

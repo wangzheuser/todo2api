@@ -139,16 +139,18 @@ field is empty. Per request, the gateway only overrides the resolved model and,
 when client tools are present, the raw tool protocol and its permissions.
 
 Configured upstream model values use todofor.ai's
-`provider:author/model_id` format, such as
-`openai:openai/gpt-5.6-sol`. Clients normally use the automatically generated
-short model names.
+`inference_provider:author/model_id` format, such as
+`deepinfra:z-ai/glm-5.3-flash`. The inference provider comes from each model's
+`provider` field and can differ from `owned_by`; clients normally use the
+automatically generated short model names.
 
 At startup, the gateway queries the same `GET /api/v1/models` endpoint used by
 the official todofor.ai CLI for every configured account. `/v1/models` exposes
-short IDs from the intersection, so every advertised model is available
-regardless of which pool account is selected. Entries include the upstream
-owner, creation time, context window, and maximum completion tokens. For
-example:
+short IDs from the common account catalog. Catalog presence does not guarantee
+that a free upstream account will execute that model without substitution.
+Entries include the upstream owner, creation time, context window, maximum
+completion tokens, and the configuration-driven `free_account_callable`
+verification flag. For example:
 
 ```text
 claude-sonnet-4.6
@@ -158,12 +160,19 @@ grok-4.20
 ```
 
 Full provider/model IDs and runner IDs remain accepted as compatibility input
-and are converted to the runner's provider-qualified form on use, such as
+and are converted to the inference-provider-qualified form on use, such as
 `anthropic:anthropic/claude-sonnet-4.6`. If providers advertise the same short
 ID, those entries keep their provider prefix to remain unambiguous. Explicit
 aliases under `models.aliases` override discovered IDs on collision. A
 transient catalog failure is logged as a startup warning and falls back to the
 configured aliases and short default name instead of preventing startup.
+
+`models.free_account_models` contains exact public IDs whose actual `runMeta`
+model has been verified on free accounts. Whitespace is trimmed and empty or
+duplicate entries are rejected. Aliases never inherit the target model's flag;
+list an alias explicitly only after verifying that public ID. The list is
+display-only metadata: runtime model mismatch validation remains authoritative
+and paid-account requests are not restricted by it.
 
 On the first start with an empty database, legacy account pools can be imported
 from YAML and key files. Each file contains one API key per line; blank lines,
@@ -291,20 +300,27 @@ a strict prompt requiring exactly one block:
 <TOOL_CALL>{"name":"read_file","arguments":{"path":"/tmp/example.txt"}}</TOOL_CALL>
 ```
 
+The listed tools are client-executed and remain available for the assistant to
+request. A catalog miss does not mark other tools unavailable, and only an
+explicit result from the same tool establishes a call failure. Requests with
+client tools also clear saved upstream MCP, Edge, and device metadata so the
+assistant uses the caller's persona and tool list rather than the relay's
+internal identity or capabilities.
+
 It also sends these permissions by default:
 
 ```json
 {
   "allow": [],
-  "deny": ["device:*", "cloud:*"]
+  "deny": ["device:*", "cloud:*", "*"]
 }
 ```
 
 The patterns follow todofor.ai's permission matcher: `device:*` covers concrete
-Edge/bridge devices, while `cloud:*` blocks the hosted cloud machine. This is a
-second enforcement layer behind the raw system prompt. It prevents upstream
-device execution, but no prompt can mathematically guarantee model compliance;
-the gateway only converts syntactically valid `<TOOL_CALL>` blocks.
+Edge/bridge devices, while `cloud:*` blocks the hosted cloud machine. The final
+wildcard isolates all remaining upstream-native tools whenever client tools are
+present. This is a second enforcement layer behind the raw system prompt. The
+gateway only converts syntactically valid `<TOOL_CALL>` blocks.
 
 Run the complete two-request curl flow, including local file execution:
 
@@ -312,8 +328,23 @@ Run the complete two-request curl flow, including local file execution:
 ./examples/tool_call_curl.sh
 ```
 
+For local regression against a running instance, including streaming and a
+capability-catalog miss followed by a real file call, run:
+
+```bash
+CLIENT_TOKEN=... MODEL=glm-5.3-flash ./examples/local_tool_regression.sh
+```
+
 The client should repeat `tools` on every tool-result request, as standard
 OpenAI clients do.
+
+An upstream turn with no visible assistant content is never returned as a
+successful empty `stop`, even when it reports billable usage. A continuation
+that ends empty is rebuilt once as a fresh todo on another account using the
+existing tool-result history; streaming starts only after the replacement turn
+produces visible output or a structured tool call. The gateway also compares
+the requested provider-qualified model with `runMeta.extras.model` and fails
+closed when the upstream silently executes a different model.
 
 Responses dynamic tool definitions support `function`, `custom`, and
 `namespace`. Namespace children are qualified only while talking to the

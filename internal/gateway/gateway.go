@@ -48,11 +48,14 @@ var ErrUpstreamRunFailed = errors.New("upstream todo run failed")
 // and must not be retried with another account.
 var ErrUpstreamRequestRejected = errors.New("upstream request rejected")
 
-// ErrEmptyCompletion means the upstream reported a completed run but did not
-// expose either assistant text or authoritative usage metadata. Treating this
-// as success makes clients observe an empty answer (and usage=0), so new
-// conversations use it as a signal to try another account.
-var ErrEmptyCompletion = errors.New("Upstream returned an empty completion without usage")
+// ErrUpstreamModelMismatch means the upstream completed the run with a model
+// other than the provider-qualified model requested in AgentSettings.
+var ErrUpstreamModelMismatch = errors.New("upstream executed a different model than requested")
+
+// ErrEmptyCompletion means the upstream reported a completed run without any
+// visible assistant text, regardless of whether it also reported billable
+// usage. Treating that state as success makes clients observe an empty answer.
+var ErrEmptyCompletion = errors.New("upstream returned an empty completion without visible content")
 
 func New(cfg *config.Config, p *pool.Pool, s *session.Store, recorders ...CallRecorder) *Gateway {
 	g := &Gateway{cfg: cfg, pool: p, sess: s}
@@ -120,6 +123,7 @@ func (g *Gateway) Models() []openai.Model {
 
 	result := make([]openai.Model, 0, len(models))
 	for _, model := range models {
+		model.FreeAccountCallable = g.cfg.Models.IsFreeAccountCallable(model.ID)
 		result = append(result, model)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -213,7 +217,14 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 	var err error
 	if resuming {
 		acc.Acquire()
-		defer acc.Release()
+		defer func() {
+			if sub != nil {
+				sub.Close()
+			}
+			if acc != nil {
+				acc.Release()
+			}
+		}()
 		runtime = acc.Runtime()
 		if runtime.Client == nil {
 			return nil, fmt.Errorf("session account client is unavailable")
@@ -225,8 +236,6 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			}
 			return nil, err
 		}
-		defer sub.Close()
-
 		agent, filteredTools := g.accountRequestSettings(runtime, runnerModel, req)
 		content := followUpBody(req.Messages)
 		if content == "" {
@@ -249,25 +258,74 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			}
 			return nil, err
 		}
-		if emit != nil {
-			if err := emit(StreamEvent{Type: StreamStart, Model: publicModel, TodoID: todoID}); err != nil {
-				return nil, fmt.Errorf("emit stream start: %w", err)
+		streamStarted := false
+		startStream := func() error {
+			if emit == nil || streamStarted {
+				return nil
 			}
+			if err := emit(StreamEvent{Type: StreamStart, Model: publicModel, TodoID: todoID}); err != nil {
+				return fmt.Errorf("emit stream start: %w", err)
+			}
+			streamStarted = true
+			return nil
 		}
 		var emitText func(string) error
 		if emit != nil {
 			emitText = func(delta string) error {
+				if err := startStream(); err != nil {
+					return err
+				}
 				return emit(StreamEvent{Type: StreamTextDelta, Model: publicModel, TodoID: todoID, Delta: delta})
 			}
 		}
 		result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, previousAssistantSignature, emitText)
-		if err == nil && result.Content == "" && !result.Usage.Available {
-			err = ErrEmptyCompletion
+		if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
+			log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+			err = ErrUpstreamModelMismatch
 		}
 		if err != nil {
 			if handleErr := g.handleAccountFailure(acc, err); handleErr != nil {
 				return nil, handleErr
 			}
+			return nil, err
+		}
+		if emptyAssistantResult(result) {
+			if streamStarted {
+				return nil, ErrEmptyCompletion
+			}
+			oldAcc, oldTodoID := acc, todoID
+			sub.Close()
+			sub = nil
+			oldAcc.Release()
+			acc = nil
+			if handleErr := g.handleAccountFailure(oldAcc, ErrEmptyCompletion); handleErr != nil {
+				return nil, handleErr
+			}
+			excluded := map[*pool.Account]struct{}{oldAcc: {}}
+			acc, runtime, sub, todoID, err = g.startNewConversationExcept(runCtx, req, runnerModel, excluded)
+			if err != nil {
+				return nil, fmt.Errorf("rebase empty todo %s: %w", oldTodoID, err)
+			}
+			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText)
+			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
+				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+				err = ErrUpstreamModelMismatch
+			}
+			if err != nil {
+				if handleErr := g.handleAccountFailure(acc, err); handleErr != nil {
+					return nil, handleErr
+				}
+				return nil, err
+			}
+			if emptyAssistantResult(result) {
+				if handleErr := g.handleAccountFailure(acc, ErrEmptyCompletion); handleErr != nil {
+					return nil, handleErr
+				}
+				return nil, fmt.Errorf("%w after rebasing todo %s", ErrEmptyCompletion, oldTodoID)
+			}
+			log.Printf("rebased empty upstream todo %s to todo %s on account %d", oldTodoID, todoID, g.pool.IndexOf(acc)+1)
+		}
+		if err := startStream(); err != nil {
 			return nil, err
 		}
 	} else {
@@ -313,7 +371,11 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				}
 			}
 			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText)
-			empty := err == nil && result.Content == "" && !result.Usage.Available
+			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
+				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+				err = ErrUpstreamModelMismatch
+			}
+			empty := err == nil && emptyAssistantResult(result)
 			if err == nil && !empty {
 				if err := startStream(); err != nil {
 					sub.Close()
@@ -374,6 +436,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 	}
 	content := result.Content
 	text, calls := openai.ParseToolCalls(content)
+	calls = openai.ResolveClientToolAliases(calls, req.Tools)
 
 	assistant := openai.ChatMessage{Role: "assistant", Content: content}
 	if len(calls) > 0 {
@@ -570,6 +633,9 @@ func accountFailurePolicy(err error) (accountFailureAction, time.Duration) {
 	if errors.Is(err, ErrUpstreamRunFailed) {
 		return accountFailureCooldown, 2 * time.Minute
 	}
+	if errors.Is(err, ErrUpstreamModelMismatch) {
+		return accountFailureCooldown, 10 * time.Minute
+	}
 	if errors.Is(err, ErrEmptyCompletion) {
 		// A completed run with no body is usually a transient upstream/account
 		// failure. Keep it out of rotation long enough that a large pool does
@@ -685,29 +751,38 @@ func enrichToolResultNames(msgs []openai.ChatMessage, todoID string, store *sess
 func (g *Gateway) agentSettings(template upstream.AgentSettings, model string, systemPrompt string, tools []openai.Tool) upstream.AgentSettings {
 	agent := template
 	agent.Model = model
-
-	// Merge user-provided system prompt with tool instructions
-	if systemPrompt != "" && len(tools) > 0 {
-		// Both system and tools: combine them
-		agent.SystemMessage = systemPrompt + "\n\n" + openai.BuildToolSystemPrompt(tools)
-		agent.SystemMessageMode = "raw"
-	} else if systemPrompt != "" {
-		// Only system prompt
-		agent.SystemMessage = systemPrompt
-		agent.SystemMessageMode = "raw"
-	} else if len(tools) > 0 {
-		// Only tools
-		agent.SystemMessage = openai.BuildToolSystemPrompt(tools)
-		agent.SystemMessageMode = "raw"
+	agent.Name = "Client Agent"
+	smartSystemPrompt := false
+	agent.SmartSystemPrompt = &smartSystemPrompt
+	agent.SystemMessageMode = "raw"
+	parts := []string{strings.TrimSpace(systemPrompt), openai.IdentitySystemPrompt()}
+	if len(tools) > 0 {
+		parts = append(parts, openai.BuildToolSystemPrompt(tools))
 	}
+	agent.SystemMessage = strings.Join(nonEmptyStrings(parts), "\n\n")
 
 	if len(tools) > 0 {
+		agent.MCPConfigs = map[string]any{}
+		agent.EdgesMCPConfigs = map[string]map[string]any{}
+		agent.DevicesConfig = nil
 		agent.Permissions = &upstream.ToolPermissions{
 			Allow: []string{},
-			Deny:  append([]string(nil), g.cfg.ToolProtocol.DenyUpstreamTools...),
+			Deny:  append(append([]string(nil), g.cfg.ToolProtocol.DenyUpstreamTools...), "*"),
 		}
 	}
 	return agent
+}
+
+// nonEmptyStrings removes blank system-prompt components while preserving
+// their precedence order.
+func nonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func (g *Gateway) sessionEntry(req openai.ChatRequest) (session.Entry, bool) {
@@ -998,8 +1073,17 @@ func truncateRunError(message string) string {
 }
 
 type assistantResult struct {
-	Content string
-	Usage   TokenUsage
+	Content     string
+	Usage       TokenUsage
+	ActualModel string
+}
+
+func emptyAssistantResult(result assistantResult) bool {
+	return strings.TrimSpace(result.Content) == ""
+}
+
+func upstreamModelMismatch(expected, actual string) bool {
+	return expected != "" && actual != "" && !strings.EqualFold(expected, actual)
 }
 
 func finishAssistant(
@@ -1072,7 +1156,7 @@ func finalAssistant(ctx context.Context, cli *upstream.Client, todoID, previousA
 		if previousAssistantSignature != "" && assistantMessageSignature(msgs[i]) == previousAssistantSignature {
 			return assistantResult{Content: fallback}, nil
 		}
-		result := assistantResult{Usage: tokenUsage(msgs[i].RunMeta)}
+		result := assistantResult{Usage: tokenUsage(msgs[i].RunMeta), ActualModel: actualModel(msgs[i].RunMeta)}
 		if msgs[i].Content != "" {
 			result.Content = msgs[i].Content
 			return result, nil
@@ -1117,6 +1201,15 @@ func tokenUsage(meta []upstream.RunMeta) TokenUsage {
 		usage.CacheWriteTokens += item.Extras.CacheWriteTokens
 	}
 	return usage
+}
+
+func actualModel(meta []upstream.RunMeta) string {
+	for i := len(meta) - 1; i >= 0; i-- {
+		if meta[i].Type == "todo:msg_meta_ai" && meta[i].Extras.Model != "" {
+			return meta[i].Extras.Model
+		}
+	}
+	return ""
 }
 
 func conversationKey(system string, msgs []openai.ChatMessage) string {

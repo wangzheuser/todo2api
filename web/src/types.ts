@@ -92,6 +92,7 @@ export interface CatalogModel {
   context_length?: number;
   max_completion_tokens?: number;
   available: boolean;
+  free_account_callable: boolean;
   availability_reason?:
     | "no_active_accounts"
     | "catalog_incomplete"

@@ -109,8 +109,9 @@ func newService(cfg *config.Config, store *storage.Store, p *pool.Pool, proxies 
 		proxies, _ = proxypool.New(nil)
 	}
 	s := &Service{
-		cfg: cfg, store: store, pool: p, modelCatalog: modelcatalog.NewService(p, cfg.Models.Aliases),
-		proxies: proxies, ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{},
+		cfg: cfg, store: store, pool: p,
+		modelCatalog: modelcatalog.NewService(p, cfg.Models.Aliases, cfg.Models.FreeAccountModels),
+		proxies:      proxies, ctx: ctx, hub: newEventHub(), loginAttempts: map[string]loginAttempt{},
 	}
 	for _, cidr := range cfg.Web.TrustedProxies {
 		_, network, err := net.ParseCIDR(cidr)

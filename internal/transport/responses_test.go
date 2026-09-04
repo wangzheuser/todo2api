@@ -126,6 +126,27 @@ func TestResponsesRequestMergesAdditionalTools(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestIgnoresUnemulatedServerTools(t *testing.T) {
+	req := responsesRequest{
+		Model: "public-model",
+		Input: json.RawMessage(`"inspect the workspace"`),
+		Tools: []responsesTool{
+			{Type: "function", Name: "exec_command", Parameters: json.RawMessage(`{"type":"object"}`)},
+			{Type: "web_search"},
+		},
+	}
+	chat, targets, err := req.chatRequest("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.Tools) != 1 || chat.Tools[0].Function.Name != "exec_command" {
+		t.Fatalf("tools = %#v", chat.Tools)
+	}
+	if len(targets) != 1 || targets["exec_command"].Name != "exec_command" {
+		t.Fatalf("targets = %#v", targets)
+	}
+}
+
 func TestResponsesRequestConvertsAgentMessages(t *testing.T) {
 	req := responsesRequest{
 		Model: "public-model",

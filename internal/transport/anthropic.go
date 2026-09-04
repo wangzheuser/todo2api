@@ -373,7 +373,7 @@ func (r anthropicRequest) chatRequest(todoID string) (openai.ChatRequest, error)
 		chat.Metadata = map[string]string{openai.TodoIDMetadataKey: todoID}
 	}
 	if len(bytes.TrimSpace(r.System)) > 0 && !bytes.Equal(bytes.TrimSpace(r.System), []byte("null")) {
-		system, err := anthropicText(r.System)
+		system, err := anthropicClientSystem(r.System)
 		if err != nil {
 			return openai.ChatRequest{}, fmt.Errorf("invalid system content: %w", err)
 		}
@@ -426,6 +426,10 @@ func (r anthropicRequest) chatRequest(todoID string) (openai.ChatRequest, error)
 			for _, block := range blocks {
 				switch block.Type {
 				case "text":
+					if len(blocks) > 1 && isAnthropicSystemReminder(block.Text) {
+						appendAnthropicSystem(&chat.System, strings.TrimSpace(block.Text))
+						continue
+					}
 					text.WriteString(block.Text)
 				case "image":
 					attachment, err := anthropicImageAttachment(block)
@@ -488,6 +492,47 @@ func (r anthropicRequest) chatRequest(todoID string) (openai.ChatRequest, error)
 		})
 	}
 	return chat, nil
+}
+
+// anthropicClientSystem removes Claude Code's transport identity blocks while
+// preserving any explicit custom system instructions that follow them.
+func anthropicClientSystem(raw json.RawMessage) (string, error) {
+	blocks, err := decodeAnthropicContent(raw)
+	if err != nil {
+		return "", err
+	}
+	claudeCode := false
+	for _, block := range blocks {
+		if strings.HasPrefix(strings.TrimSpace(block.Text), "x-anthropic-billing-header:") {
+			claudeCode = true
+			break
+		}
+	}
+	if !claudeCode {
+		return anthropicText(raw)
+	}
+	var parts []string
+	for _, block := range blocks {
+		text := strings.TrimSpace(block.Text)
+		if text == "" || isClaudeCodeRuntimeSystem(text) {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+func isClaudeCodeRuntimeSystem(text string) bool {
+	return strings.HasPrefix(text, "x-anthropic-billing-header:") ||
+		strings.HasPrefix(text, "You are Claude Code, Anthropic's official CLI for Claude.") ||
+		strings.HasPrefix(text, "You are a Claude agent, built on Anthropic's Claude Agent SDK.")
+}
+
+// isAnthropicSystemReminder identifies Claude Code's separate system context
+// block so it does not obscure the actual user prompt for upstream models.
+func isAnthropicSystemReminder(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "<system-reminder>") && strings.HasSuffix(text, "</system-reminder>")
 }
 
 func anthropicImageAttachment(block anthropicContentBlock) (openai.AttachmentInput, error) {

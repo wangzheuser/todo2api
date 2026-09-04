@@ -87,6 +87,7 @@ type Model struct {
 	MaxCompletionTokens int64    `json:"max_completion_tokens,omitempty"`
 	Available           bool     `json:"available"`
 	AvailabilityReason  string   `json:"availability_reason,omitempty"`
+	FreeAccountCallable bool     `json:"free_account_callable"`
 	Pricing             *Pricing `json:"pricing,omitempty"`
 }
 
@@ -101,9 +102,10 @@ type Response struct {
 
 // Service combines the embedded pricing catalog with the live account pool.
 type Service struct {
-	catalog *Catalog
-	pool    *pool.Pool
-	aliases map[string]string
+	catalog           *Catalog
+	pool              *pool.Pool
+	aliases           map[string]string
+	freeAccountModels map[string]struct{}
 }
 
 // Default returns the validated embedded catalog.
@@ -141,12 +143,19 @@ func Load(data []byte) (*Catalog, error) {
 }
 
 // NewService creates a model-list service backed by the current pool.
-func NewService(p *pool.Pool, aliases map[string]string) *Service {
+func NewService(p *pool.Pool, aliases map[string]string, freeAccountModels []string) *Service {
 	copyAliases := make(map[string]string, len(aliases))
 	for alias, target := range aliases {
 		copyAliases[alias] = target
 	}
-	return &Service{catalog: Default(), pool: p, aliases: copyAliases}
+	copyFreeAccountModels := make(map[string]struct{}, len(freeAccountModels))
+	for _, model := range freeAccountModels {
+		copyFreeAccountModels[model] = struct{}{}
+	}
+	return &Service{
+		catalog: Default(), pool: p, aliases: copyAliases,
+		freeAccountModels: copyFreeAccountModels,
+	}
 }
 
 // Models returns static catalog rows overlaid with live model metadata.
@@ -201,6 +210,7 @@ func (s *Service) Models() Response {
 		PricingUpdatedAt:     s.catalog.SnapshotAt,
 	}
 	for _, model := range models {
+		_, model.FreeAccountCallable = s.freeAccountModels[model.ID]
 		response.Models = append(response.Models, model)
 		if model.Available {
 			response.Available++

@@ -25,6 +25,9 @@ models:
   default: openai:vendor/upstream-model
   aliases:
     public-model: openai:vendor/upstream-model
+  free_account_models:
+    - " claude-haiku-4.5 "
+    - claude-sonnet-5
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -48,6 +51,9 @@ models:
 	}
 	if got := cfg.Models.Resolve("public-model"); got != "openai:vendor/upstream-model" {
 		t.Fatalf("resolved model = %q", got)
+	}
+	if !reflect.DeepEqual(cfg.Models.FreeAccountModels, []string{"claude-haiku-4.5", "claude-sonnet-5"}) {
+		t.Fatalf("free account models = %#v", cfg.Models.FreeAccountModels)
 	}
 	if !reflect.DeepEqual(cfg.ToolProtocol.DenyUpstreamTools, []string{"device:*", "cloud:*"}) {
 		t.Fatalf("deny defaults = %#v", cfg.ToolProtocol.DenyUpstreamTools)
@@ -366,6 +372,54 @@ func TestRejectsUnqualifiedUpstreamModels(t *testing.T) {
 			cfg.setDefaults()
 			if err := cfg.Validate(); err == nil {
 				t.Fatal("expected unqualified model validation error")
+			}
+		})
+	}
+}
+
+func TestFreeAccountModelsValidation(t *testing.T) {
+	base := func(models []string) Config {
+		return Config{
+			Storage: StorageConfig{MasterKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="},
+			Web:     WebConfig{AdminUsername: "admin", AdminPassword: "test"},
+			Models: ModelsConfig{
+				Default:           "openai:openai/gpt-5.6-sol",
+				FreeAccountModels: models,
+			},
+		}
+	}
+
+	cfg := base([]string{" claude-haiku-4.5 ", "claude-sonnet-5"})
+	cfg.setDefaults()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claude-haiku-4.5", "claude-sonnet-5"}
+	if !reflect.DeepEqual(cfg.Models.FreeAccountModels, want) {
+		t.Fatalf("free account models = %#v, want %#v", cfg.Models.FreeAccountModels, want)
+	}
+	if !cfg.Models.IsFreeAccountCallable("claude-sonnet-5") || cfg.Models.IsFreeAccountCallable("ox-alpha") {
+		t.Fatalf("unexpected free account lookup: %#v", cfg.Models.FreeAccountModels)
+	}
+
+	missing := base(nil)
+	missing.setDefaults()
+	if err := missing.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if missing.Models.FreeAccountModels == nil || len(missing.Models.FreeAccountModels) != 0 {
+		t.Fatalf("missing free account models = %#v", missing.Models.FreeAccountModels)
+	}
+
+	for name, models := range map[string][]string{
+		"empty":     {" "},
+		"duplicate": {"claude-sonnet-5", " claude-sonnet-5 "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := base(models)
+			invalid.setDefaults()
+			if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "models.free_account_models") {
+				t.Fatalf("error = %v", err)
 			}
 		})
 	}

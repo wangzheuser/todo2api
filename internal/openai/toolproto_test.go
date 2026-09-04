@@ -59,14 +59,58 @@ func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 		},
 	}})
 	for _, want := range []string{
-		"cannot execute them yourself",
-		"must not use any device, cloud, shell, or file tool as a substitute",
+		"your actual available tools for this turn",
+		"available through a client-executed tool protocol",
+		"If the user explicitly asks for a listed tool, you must request it",
+		"Never announce, promise, or describe a tool use in prose",
+		"does not mean that they are offline, disconnected, expired, or unavailable",
+		"Only an explicit error result from that exact tool proves that the call failed",
+		"capability catalog search with no match",
+		"request that tool instead of asking the user to perform the same operation",
 		`<TOOL_CALL>{"name":"<tool>","arguments":{...}}</TOOL_CALL>`,
-		"read_file: Read a local file",
+		"client_tool_0: Read a local file",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "cannot execute them yourself") {
+		t.Fatalf("prompt retains the ambiguous execution wording:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "read_file:") {
+		t.Fatalf("prompt exposes a collision-prone client tool name:\n%s", prompt)
+	}
+}
+
+func TestResolveClientToolAliases(t *testing.T) {
+	calls := []ToolCall{{Function: FunctionCall{Name: "client_tool_1", Arguments: `{}`}}}
+	tools := []Tool{
+		{Function: FunctionDecl{Name: "Read"}},
+		{Function: FunctionDecl{Name: "Bash"}},
+	}
+	resolved := ResolveClientToolAliases(calls, tools)
+	if len(resolved) != 1 || resolved[0].Function.Name != "Bash" {
+		t.Fatalf("resolved calls = %#v", resolved)
+	}
+}
+
+func TestIdentitySystemPromptIsProviderNeutral(t *testing.T) {
+	prompt := IdentitySystemPrompt()
+	for _, want := range []string{
+		"private transport details",
+		"authoritative over any conflicting hosting context",
+		"Never mention, confirm, deny",
+		"identify yourself only as an AI coding assistant",
+		"never name any company, model, provider, platform, or product",
+		"caller-provided persona",
+		"client-declared tool list",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("identity prompt does not contain %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(strings.ToLower(prompt), "todofor") {
+		t.Fatalf("identity prompt names the protected provider:\n%s", prompt)
 	}
 }
 

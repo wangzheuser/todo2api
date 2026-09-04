@@ -331,6 +331,44 @@ func TestAnthropicClaudeCodeRequestDecodes(t *testing.T) {
 	}
 }
 
+func TestAnthropicClaudeCodeSystemReminderDoesNotHideUserPrompt(t *testing.T) {
+	var req anthropicRequest
+	if err := json.Unmarshal([]byte(`{
+		"model":"glm-5.3-flash",
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"<system-reminder>current date</system-reminder>"},
+			{"type":"text","text":"Read fixture.txt"}
+		]}]
+	}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := req.chatRequest("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(chat.System, "<system-reminder>current date</system-reminder>") {
+		t.Fatalf("system = %q", chat.System)
+	}
+	if len(chat.Messages) != 1 || chat.Messages[0].Content != "Read fixture.txt" {
+		t.Fatalf("messages = %#v", chat.Messages)
+	}
+}
+
+func TestAnthropicClaudeCodeRuntimeSystemIsIsolated(t *testing.T) {
+	raw := json.RawMessage(`[
+		{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.202"},
+		{"type":"text","text":"You are a Claude agent, built on Anthropic's Claude Agent SDK."},
+		{"type":"text","text":"Inspect files in Plan Mode before answering."}
+	]`)
+	got, err := anthropicClientSystem(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Inspect files in Plan Mode before answering." {
+		t.Fatalf("system = %q", got)
+	}
+}
+
 func TestAnthropicClaudeCodeRequestOverHTTP(t *testing.T) {
 	handler := anthropicTestServer().Handler()
 	for _, auth := range []struct{ name, header, value string }{

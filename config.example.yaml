@@ -42,6 +42,10 @@ models:
   default: "openai:openai/gpt-5.6-sol"
   aliases:
     gpt-5.6-sol: "openai:openai/gpt-5.6-sol"
+  # Public IDs verified by runMeta on free accounts. Aliases must be listed explicitly.
+  free_account_models:
+    - "claude-haiku-4.5"
+    - "claude-sonnet-5"
 
 # Edge MCP tools are optional. When enabled, allowed tools are discovered once
 # and forwarded as filteredEdgeTools on each upstream request.

@@ -275,6 +275,18 @@ func TestPublicModelIDsDisambiguateProviderCollisions(t *testing.T) {
 	}
 }
 
+func TestResolveModelUsesInferenceProvider(t *testing.T) {
+	p := &Pool{}
+	p.setModels([]upstream.ModelInfo{{
+		ID: "z-ai/glm-5.3-flash", OwnedBy: "z-ai", Provider: "DeepInfra",
+	}})
+	for _, input := range []string{"glm-5.3-flash", "z-ai/glm-5.3-flash", "z-ai:z-ai/glm-5.3-flash"} {
+		if got := p.ResolveModel(input); got != "deepinfra:z-ai/glm-5.3-flash" {
+			t.Fatalf("ResolveModel(%q) = %q", input, got)
+		}
+	}
+}
+
 func TestCommonModelsWithoutSuccessfulCatalog(t *testing.T) {
 	if models := commonModels(nil); models != nil {
 		t.Fatalf("models = %#v", models)

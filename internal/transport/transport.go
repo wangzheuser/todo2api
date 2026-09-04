@@ -126,7 +126,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		list.Data = append(list.Data, openai.Model{ID: id, Object: "model", OwnedBy: "todofor.ai"})
+		list.Data = append(list.Data, openai.Model{
+			ID: id, Object: "model", OwnedBy: "todofor.ai",
+			FreeAccountCallable: s.cfg.Models.IsFreeAccountCallable(id),
+		})
 	}
 	writeJSON(w, http.StatusOK, list)
 }

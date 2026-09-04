@@ -234,7 +234,8 @@ func TestAuthRequiresBearerScheme(t *testing.T) {
 
 func TestModelsIncludesDefaultAndIsSorted(t *testing.T) {
 	s := &Server{cfg: &config.Config{Models: config.ModelsConfig{
-		Default: "model-default",
+		Default:           "model-default",
+		FreeAccountModels: []string{"model-a"},
 		Aliases: map[string]string{
 			"model-z": "upstream-z",
 			"model-a": "upstream-a",
@@ -255,6 +256,9 @@ func TestModelsIncludesDefaultAndIsSorted(t *testing.T) {
 		if model.ID != want[i] {
 			t.Fatalf("model[%d] = %q, want %q", i, model.ID, want[i])
 		}
+	}
+	if !list.Data[0].FreeAccountCallable || list.Data[1].FreeAccountCallable || list.Data[2].FreeAccountCallable {
+		t.Fatalf("free account flags = %#v", list.Data)
 	}
 }
 

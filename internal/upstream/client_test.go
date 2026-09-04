@@ -380,7 +380,7 @@ func TestModelsAndRunnerModelID(t *testing.T) {
 			"object": "list",
 			"data": []map[string]any{{
 				"id": "anthropic/claude-sonnet-4.6", "object": "model",
-				"created": 123, "owned_by": "anthropic",
+				"created": 123, "owned_by": "anthropic", "provider": "DeepInfra",
 				"name":           "Anthropic: Claude Sonnet 4.6",
 				"context_length": 1000000, "max_completion_tokens": 128000,
 			}},
@@ -392,7 +392,7 @@ func TestModelsAndRunnerModelID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].ID != "anthropic/claude-sonnet-4.6" || models[0].ContextLength != 1000000 {
+	if len(models) != 1 || models[0].ID != "anthropic/claude-sonnet-4.6" || models[0].Provider != "DeepInfra" || models[0].ContextLength != 1000000 {
 		t.Fatalf("models = %#v", models)
 	}
 	for input, want := range map[string]string{
@@ -404,6 +404,12 @@ func TestModelsAndRunnerModelID(t *testing.T) {
 		if got := RunnerModelID(input); got != want {
 			t.Fatalf("RunnerModelID(%q) = %q, want %q", input, got, want)
 		}
+	}
+	if got := QualifiedModelID(models[0]); got != "deepinfra:anthropic/claude-sonnet-4.6" {
+		t.Fatalf("QualifiedModelID() = %q", got)
+	}
+	if got := QualifiedModelID(ModelInfo{ID: "z-ai/glm-5.3-flash", Provider: "DeepInfra", OwnedBy: "z-ai"}); got != "deepinfra:z-ai/glm-5.3-flash" {
+		t.Fatalf("GLM QualifiedModelID() = %q", got)
 	}
 }
 

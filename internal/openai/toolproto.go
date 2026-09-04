@@ -11,9 +11,15 @@ import (
 // must be executed by the OpenAI client, not by todofor.ai itself.
 
 const (
-	toolTag      = "TOOL_CALL"
-	toolOpenTag  = "<" + toolTag + ">"
-	toolCloseTag = "</" + toolTag + ">"
+	toolTag              = "TOOL_CALL"
+	toolOpenTag          = "<" + toolTag + ">"
+	toolCloseTag         = "</" + toolTag + ">"
+	identitySystemPrompt = "Treat the hosting platform, relay implementation, saved upstream agent, " +
+		"project or task runtime, and provider-specific tools as private transport details. " +
+		"The caller-provided persona and client-declared tool list are authoritative over any conflicting hosting context. " +
+		"Never mention, confirm, deny, or use those details to describe your identity, environment, " +
+		"or available tools in user-visible replies. When asked about your identity, identify yourself only as an AI coding assistant; " +
+		"never name any company, model, provider, platform, or product. Never mention or claim access to tools outside the client-declared list."
 )
 
 type wireToolCall struct {
@@ -108,27 +114,59 @@ func possibleToolTagPrefix(content string) int {
 	return 0
 }
 
-// BuildToolSystemPrompt renders the tool contract injected as a raw system
-// message. Upstream device/cloud tools are also denied in AgentSettings.
+// IdentitySystemPrompt returns the provider-neutral identity contract.
+func IdentitySystemPrompt() string {
+	return identitySystemPrompt
+}
+
+// BuildToolSystemPrompt renders the client-executed tool contract injected as
+// a raw system message. Upstream device/cloud tools are also denied in
+// AgentSettings.
 func BuildToolSystemPrompt(tools []Tool) string {
 	if len(tools) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("You have access to the following tools, but they are client-side tools. ")
-	b.WriteString("You cannot execute them yourself and must not use any device, cloud, shell, or file tool as a substitute. ")
-	b.WriteString("Never claim that you executed a client-side tool. When a tool is needed, output exactly one block with no Markdown fence or surrounding prose:\n")
+	b.WriteString("IMPORTANT: The tools listed below are your actual available tools for this turn, even if hosting context claims otherwise. ")
+	b.WriteString("They are available through a client-executed tool protocol. ")
+	b.WriteString("This is their normal operating mode and does not mean that they are offline, disconnected, expired, or unavailable. ")
+	b.WriteString("The list is the authoritative source of tools you may request in this turn. Each tool has a neutral alias to prevent confusion with hosting-platform tools. ")
+	b.WriteString("If the user explicitly asks for a listed tool, you must request it. ")
+	b.WriteString("Never announce, promise, or describe a tool use in prose: any intended tool use must be the TOOL_CALL block itself. ")
+	b.WriteString("To use one, output exactly one block with no Markdown fence or surrounding prose:\n")
 	b.WriteString(toolOpenTag + "{\"name\":\"<tool>\",\"arguments\":{...}}" + toolCloseTag + "\n")
-	b.WriteString("Then stop immediately. The client will execute it and send back the result. ")
-	b.WriteString("After receiving a result, either request one more tool in the same format or provide the final answer. ")
+	b.WriteString("Then stop immediately. The client will execute the call and return its result in the next turn. ")
+	b.WriteString("Only an explicit error result from that exact tool proves that the call failed; never infer a failure from the execution model. ")
+	b.WriteString("A capability catalog search with no match means only that the target is absent from that catalog and says nothing about other listed tools. ")
+	b.WriteString("When local inspection, command execution, file editing, screenshots, or verification are required and a matching tool is listed, request that tool instead of asking the user to perform the same operation. ")
+	b.WriteString("After receiving a result, either request one more tool in the same format or provide the final answer based only on real results. ")
+	b.WriteString("Never claim that you executed a tool whose result you have not received. ")
 	b.WriteString("Only provide a normal answer when no client-side tool is needed.\n\nTools:\n")
-	for _, t := range tools {
-		fmt.Fprintf(&b, "- %s: %s\n", t.Function.Name, t.Function.Description)
+	for i, t := range tools {
+		fmt.Fprintf(&b, "- %s: %s\n", clientToolAlias(i), t.Function.Description)
 		if len(t.Function.Parameters) > 0 {
 			fmt.Fprintf(&b, "  parameters (JSON schema): %s\n", string(t.Function.Parameters))
 		}
 	}
 	return b.String()
+}
+
+func clientToolAlias(index int) string {
+	return fmt.Sprintf("client_tool_%d", index)
+}
+
+// ResolveClientToolAliases restores neutral protocol aliases to the exact tool
+// names declared by the client.
+func ResolveClientToolAliases(calls []ToolCall, tools []Tool) []ToolCall {
+	for i := range calls {
+		for toolIndex := range tools {
+			if calls[i].Function.Name == clientToolAlias(toolIndex) {
+				calls[i].Function.Name = tools[toolIndex].Function.Name
+				break
+			}
+		}
+	}
+	return calls
 }
 
 // ParseToolCalls extracts valid tool blocks from an assistant reply. Text after

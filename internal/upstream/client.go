@@ -252,6 +252,7 @@ type ModelInfo struct {
 	Object              string `json:"object"`
 	Created             int64  `json:"created"`
 	OwnedBy             string `json:"owned_by"`
+	Provider            string `json:"provider,omitempty"`
 	Name                string `json:"name,omitempty"`
 	ContextLength       int64  `json:"context_length,omitempty"`
 	MaxCompletionTokens int64  `json:"max_completion_tokens,omitempty"`
@@ -385,6 +386,22 @@ func RunnerModelID(modelID string) string {
 		return modelID
 	}
 	return provider + ":" + modelID
+}
+
+// QualifiedModelID returns the provider-qualified model selector accepted by
+// AgentSettings. The inference provider can differ from the model author.
+func QualifiedModelID(model ModelInfo) string {
+	provider := strings.ToLower(strings.TrimSpace(model.Provider))
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(model.OwnedBy))
+	}
+	if provider == "" {
+		provider, _, _ = strings.Cut(model.ID, "/")
+	}
+	if provider == "" || strings.Contains(model.ID, ":") {
+		return model.ID
+	}
+	return provider + ":" + model.ID
 }
 
 type AgentSettings struct {

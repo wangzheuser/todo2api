@@ -435,10 +435,11 @@ func (p *Pool) Model(id string) (upstream.ModelInfo, bool) {
 	return model, ok
 }
 
-// ResolveModel converts any discovered model ID into AgentSettings format.
+// ResolveModel converts a public alias into the inference-provider-qualified
+// selector accepted by upstream AgentSettings.
 func (p *Pool) ResolveModel(id string) string {
 	if model, ok := p.Model(id); ok {
-		return upstream.RunnerModelID(model.ID)
+		return upstream.QualifiedModelID(model)
 	}
 	return id
 }
@@ -795,6 +796,7 @@ func (p *Pool) setModels(models []upstream.ModelInfo) {
 
 		p.modelByID[publicID] = model
 		p.modelByID[model.ID] = model
+		p.modelByRunner[upstream.QualifiedModelID(model)] = model
 		p.modelByRunner[upstream.RunnerModelID(model.ID)] = model
 		p.publicIDByID[model.ID] = publicID
 	}

@@ -76,10 +76,12 @@ type WebConfig struct {
 }
 
 type ModelsConfig struct {
-	Default string            `yaml:"default"`
-	Aliases map[string]string `yaml:"aliases"`
+	Default           string            `yaml:"default"`
+	Aliases           map[string]string `yaml:"aliases"`
+	FreeAccountModels []string          `yaml:"free_account_models"`
 }
 
+// Resolve maps a public model identifier to its configured upstream selector.
 func (m ModelsConfig) Resolve(model string) string {
 	if model == "" {
 		return m.Default
@@ -88,6 +90,16 @@ func (m ModelsConfig) Resolve(model string) string {
 		return resolved
 	}
 	return model
+}
+
+// IsFreeAccountCallable reports whether a public model ID is explicitly verified for free accounts.
+func (m ModelsConfig) IsFreeAccountCallable(model string) bool {
+	for _, candidate := range m.FreeAccountModels {
+		if candidate == model {
+			return true
+		}
+	}
+	return false
 }
 
 func validUpstreamModelName(model string) bool {
@@ -224,6 +236,9 @@ func (c *Config) setDefaults() {
 	if c.Models.Aliases == nil {
 		c.Models.Aliases = map[string]string{}
 	}
+	if c.Models.FreeAccountModels == nil {
+		c.Models.FreeAccountModels = []string{}
+	}
 	if c.ToolProtocol.DenyUpstreamTools == nil {
 		c.ToolProtocol.DenyUpstreamTools = []string{"device:*", "cloud:*"}
 	}
@@ -289,6 +304,18 @@ func (c *Config) Validate() error {
 		if !validUpstreamModelName(model) {
 			return fmt.Errorf("models.aliases[%q] must use provider:author/model_id format", alias)
 		}
+	}
+	freeAccountModels := make(map[string]struct{}, len(c.Models.FreeAccountModels))
+	for i, model := range c.Models.FreeAccountModels {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return fmt.Errorf("models.free_account_models[%d] must not be empty", i)
+		}
+		if _, exists := freeAccountModels[model]; exists {
+			return fmt.Errorf("models.free_account_models[%d] duplicates %q", i, model)
+		}
+		freeAccountModels[model] = struct{}{}
+		c.Models.FreeAccountModels[i] = model
 	}
 	return nil
 }

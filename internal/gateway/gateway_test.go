@@ -165,23 +165,41 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	if agent["model"] != "openai:vendor/upstream-model" {
 		t.Fatalf("upstream runner model = %#v", agent["model"])
 	}
+	if agent["thinkingLevel"] != "high" || agent["temperature"] != 0.25 {
+		t.Fatalf("model tuning was not preserved: %#v", agent)
+	}
 	if agent["systemMessageMode"] != "raw" {
 		t.Fatalf("agent settings = %#v", agent)
 	}
-	wantSystem := "top-level instruction\n\nsystem instruction\n\ndeveloper instruction\n\n" + openai.BuildToolSystemPrompt(tools)
+	wantSystem := "top-level instruction\n\nsystem instruction\n\ndeveloper instruction\n\n" +
+		openai.IdentitySystemPrompt() + "\n\n" + strings.TrimSpace(openai.BuildToolSystemPrompt(tools))
 	if agent["systemMessage"] != wantSystem {
 		t.Fatalf("system message = %#v, want %#v", agent["systemMessage"], wantSystem)
 	}
 	permissions := agent["permissions"].(map[string]any)
-	if deny := permissions["deny"].([]any); len(deny) != 2 || deny[0] != "device:*" || deny[1] != "cloud:*" {
+	if deny := permissions["deny"].([]any); len(deny) != 3 || deny[0] != "device:*" || deny[1] != "cloud:*" || deny[2] != "*" {
 		t.Fatalf("permissions deny = %#v", deny)
 	}
 	if agent["id"] != "agent-1" {
 		t.Fatalf("agent template id was not preserved: %#v", agent)
 	}
-	mcpConfigs, ok := agent["mcpConfigs"].(map[string]any)
-	if !ok || mcpConfigs["remote"] == nil {
-		t.Fatalf("agent MCP template was not preserved: %#v", agent["mcpConfigs"])
+	if agent["smartSystemPrompt"] != false {
+		t.Fatalf("smart system prompt = %#v", agent["smartSystemPrompt"])
+	}
+	if agent["name"] != "Client Agent" || agent["ownerId"] != "owner-1" || agent["specId"] != "spec-1" ||
+		agent["color"] != "blue" || agent["createdAt"] != float64(1) || agent["updatedAt"] != float64(1) {
+		t.Fatalf("required agent identity fields = %#v", agent)
+	}
+	for _, field := range []string{"devicesConfig"} {
+		if _, ok := agent[field]; ok {
+			t.Fatalf("isolated agent retained %s: %#v", field, agent[field])
+		}
+	}
+	if configs, ok := agent["mcpConfigs"].(map[string]any); !ok || len(configs) != 0 {
+		t.Fatalf("agent MCP configs were not isolated: %#v", agent["mcpConfigs"])
+	}
+	if configs, ok := agent["edgesMcpConfigs"].(map[string]any); !ok || len(configs) != 0 {
+		t.Fatalf("agent Edge MCP configs were not isolated: %#v", agent["edgesMcpConfigs"])
 	}
 	if _, ok := mock.createBody["filteredEdgeTools"]; ok {
 		t.Fatalf("client-tool create forwarded Edge tools: %#v", mock.createBody["filteredEdgeTools"])
@@ -191,6 +209,16 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	}
 	if _, ok := mock.addBodies[1]["filteredEdgeTools"].(map[string]any); !ok {
 		t.Fatalf("normal follow-up did not forward Edge tools: %#v", mock.addBodies[1]["filteredEdgeTools"])
+	}
+	normalAgent := mock.addBodies[1]["agentSettings"].(map[string]any)
+	if normalAgent["systemMessage"] != openai.IdentitySystemPrompt() || normalAgent["smartSystemPrompt"] != false {
+		t.Fatalf("normal follow-up identity settings = %#v", normalAgent)
+	}
+	if configs, ok := normalAgent["mcpConfigs"].(map[string]any); !ok || configs["remote"] == nil {
+		t.Fatalf("normal follow-up lost native MCP configs: %#v", normalAgent["mcpConfigs"])
+	}
+	if configs, ok := normalAgent["edgesMcpConfigs"].(map[string]any); !ok || configs["edge-1"] == nil {
+		t.Fatalf("normal follow-up lost Edge MCP configs: %#v", normalAgent["edgesMcpConfigs"])
 	}
 	if mock.prematureFetch {
 		t.Fatal("gateway fetched the final message on an intermediate READY status")
@@ -210,6 +238,7 @@ type mockUpstream struct {
 	assistantContent        string
 	prematureFetch          bool
 	streamFragments         []string
+	subscriptionContents    []string
 	streamDelay             time.Duration
 	firstResponseDelay      time.Duration
 	beforeReady             chan struct{}
@@ -256,16 +285,20 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		})
 	})
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		smartSystemPrompt := true
+		temperature := 0.25
 		json.NewEncoder(w).Encode([]map[string]any{{
 			"id": "agent-1", "name": "Gateway Agent", "ownerId": "owner-1",
-			"model": "template-model",
+			"model": "template-model", "smartSystemPrompt": smartSystemPrompt,
+			"thinkingLevel": "high", "temperature": temperature,
 			"mcpConfigs": map[string]any{
 				"remote": map[string]any{"enabled": true},
 			},
 			"edgesMcpConfigs": map[string]any{
 				"edge-1": map[string]any{"filesystem": map[string]any{"enabled": true}},
 			},
-			"createdAt": 1, "updatedAt": 1,
+			"devicesConfig": map[string]any{"device": "local"},
+			"specId":        "spec-1", "color": "blue", "createdAt": 1, "updatedAt": 1,
 		}})
 	})
 	mux.HandleFunc("/api/v1/models", func(w http.ResponseWriter, r *http.Request) {
@@ -385,13 +418,17 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		m.subscriptionCount++
 		var content string
 		fragments := append([]string(nil), m.streamFragments...)
+		subscriptionContents := append([]string(nil), m.subscriptionContents...)
 		delay := m.streamDelay
 		firstResponseDelay := m.firstResponseDelay
 		beforeReady := m.beforeReady
 		dropWSEvents := m.dropWSEvents
 		silent := m.silentKeys[r.Header.Get("X-API-Key")]
 		_, hasRunError := m.runErrors[r.Header.Get("X-API-Key")]
-		if dropWSEvents {
+		if m.subscriptionCount <= len(subscriptionContents) {
+			content = subscriptionContents[m.subscriptionCount-1]
+			m.assistantContent = content
+		} else if dropWSEvents {
 			content = m.assistantContent
 		} else if len(fragments) > 0 {
 			content = strings.Join(fragments, "")
@@ -399,7 +436,7 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		} else {
 			switch m.subscriptionCount {
 			case 1:
-				content = `<TOOL_CALL>{"name":"read_file","arguments":{"path":"a.txt"}}</TOOL_CALL>`
+				content = `<TOOL_CALL>{"name":"client_tool_0","arguments":{"path":"a.txt"}}</TOOL_CALL>`
 				m.assistantContent = "premature READY"
 			case 2:
 				content = "The file says hello."
@@ -813,6 +850,11 @@ func TestAccountFailurePolicy(t *testing.T) {
 			action: accountFailureCooldown, min: 20 * time.Second,
 		},
 		{
+			name:   "model mismatch",
+			err:    fmt.Errorf("wrong model: %w", ErrUpstreamModelMismatch),
+			action: accountFailureCooldown, min: 5 * time.Minute,
+		},
+		{
 			name:   "first response timeout",
 			err:    fmt.Errorf("account stalled: %w", ErrFirstResponseTimeout),
 			action: accountFailureCooldown, min: 5 * time.Minute,
@@ -856,8 +898,102 @@ func TestEmptyCompletionErrorIsStable(t *testing.T) {
 	if !errors.Is(err, ErrEmptyCompletion) {
 		t.Fatalf("errors.Is(%v, ErrEmptyCompletion) = false", err)
 	}
-	if got := err.Error(); got != "Upstream returned an empty completion without usage; no fallback account was available" {
+	if got := err.Error(); got != "upstream returned an empty completion without visible content; no fallback account was available" {
 		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestEmptyAssistantResultIgnoresUsage(t *testing.T) {
+	if !emptyAssistantResult(assistantResult{
+		Content: " \n\t", Usage: TokenUsage{Available: true, OutputTokens: 86},
+	}) {
+		t.Fatal("billable completion without visible content was accepted")
+	}
+	if emptyAssistantResult(assistantResult{Content: "visible", Usage: TokenUsage{Available: true}}) {
+		t.Fatal("visible completion was rejected")
+	}
+}
+
+func TestActualModelAndMismatch(t *testing.T) {
+	meta := []upstream.RunMeta{{
+		Type: "todo:msg_meta_ai", Extras: upstream.RunMetaExtras{Model: "deepinfra:z-ai/glm-5.3-flash"},
+	}}
+	if got := actualModel(meta); got != "deepinfra:z-ai/glm-5.3-flash" {
+		t.Fatalf("actual model = %q", got)
+	}
+	if upstreamModelMismatch("deepinfra:z-ai/glm-5.3-flash", actualModel(meta)) {
+		t.Fatal("matching model reported as mismatch")
+	}
+	if !upstreamModelMismatch("deepinfra:z-ai/glm-5.3-flash", "anthropic:anthropic/claude-sonnet-5") {
+		t.Fatal("different model was accepted")
+	}
+}
+
+func TestResumedEmptyCompletionRebasesBeforeStartingStream(t *testing.T) {
+	mock := newMockUpstream(t)
+	mock.mu.Lock()
+	mock.subscriptionContents = []string{"", "Recovered from the existing tool result."}
+	mock.mu.Unlock()
+	cfg := &config.Config{
+		Upstream: config.UpstreamConfig{BaseURL: mock.server.URL + "/api/v1", PollTimeout: 3 * time.Second},
+		Pool: config.PoolConfig{Strategy: "round_robin", Keys: []config.AccountKey{
+			{APIKey: "upstream-key", ProjectID: "project-1"},
+			{APIKey: "fallback-key", ProjectID: "project-1"},
+		}},
+		Models: config.ModelsConfig{
+			Default: "openai:vendor/upstream-model",
+			Aliases: map[string]string{"public-model": "openai:vendor/upstream-model"},
+		},
+		ToolProtocol: config.ToolProtocolConfig{DenyUpstreamTools: []string{"device:*", "cloud:*"}},
+	}
+	p, err := pool.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := session.New()
+	req := openai.ChatRequest{
+		Model: "public-model",
+		Messages: []openai.ChatMessage{
+			{Role: "user", Content: "Read the file"},
+			{Role: "assistant", ToolCalls: []openai.ToolCall{{
+				ID: "call-1", Type: "function",
+				Function: openai.FunctionCall{Name: "read_file", Arguments: `{"path":"a.txt"}`},
+			}}},
+			{Role: "tool", ToolCallID: "call-1", Name: "read_file", Content: "existing result"},
+		},
+		Tools: []openai.Tool{{Type: "function", Function: openai.FunctionDecl{
+			Name: "read_file", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	}
+	store.Put(conversationKey("", req.Messages), session.Entry{
+		TodoID: "todo-1", Account: 0, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	store.PutToolNames("todo-1", map[string]string{"call-1": "read_file"})
+	gw := New(cfg, p, store)
+	var events []StreamEvent
+	reply, err := gw.Stream(context.Background(), req, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Content != "Recovered from the existing tool result." {
+		t.Fatalf("reply = %#v", reply)
+	}
+	if len(events) != 2 || events[0].Type != StreamStart || events[1].Type != StreamTextDelta {
+		t.Fatalf("events = %#v", events)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.addBodies) != 1 || mock.createCount != 1 {
+		t.Fatalf("add=%d create=%d", len(mock.addBodies), mock.createCount)
+	}
+	if content, _ := mock.createBody["content"].(string); !strings.Contains(content, "existing result") {
+		t.Fatalf("rebased content = %#v", content)
+	}
+	if mock.createAttempts["fallback-key"] != 1 {
+		t.Fatalf("fallback attempts = %#v", mock.createAttempts)
 	}
 }
 
@@ -942,7 +1078,7 @@ func TestStreamSuppressesSplitToolProtocol(t *testing.T) {
 	mock := newMockUpstream(t)
 	mock.mu.Lock()
 	mock.streamFragments = []string{
-		"<TO", `OL_CALL>{"name":"read_file","arguments":{"path":"a.txt"}}`, "</TOOL_CALL>",
+		"<TO", `OL_CALL>{"name":"client_tool_0","arguments":{"path":"a.txt"}}`, "</TOOL_CALL>",
 	}
 	mock.mu.Unlock()
 
@@ -1134,6 +1270,7 @@ func TestCompleteRejectsUnknownExplicitTodo(t *testing.T) {
 func TestGatewayDiscoveredModelsAndAliases(t *testing.T) {
 	mock := newMockUpstream(t)
 	gw := newTestGateway(t, mock)
+	gw.cfg.Models.FreeAccountModels = []string{"claude-sonnet-4.6", "public-model"}
 
 	models := gw.Models()
 	byID := make(map[string]openai.Model, len(models))
@@ -1152,6 +1289,12 @@ func TestGatewayDiscoveredModelsAndAliases(t *testing.T) {
 	}
 	if _, ok := byID["openai/gpt-5.6-sol"]; ok {
 		t.Fatalf("full upstream ID was advertised in %#v", models)
+	}
+	if !byID["claude-sonnet-4.6"].FreeAccountCallable || !byID["public-model"].FreeAccountCallable {
+		t.Fatalf("verified models were not marked: %#v", byID)
+	}
+	if byID["gpt-5.6-sol"].FreeAccountCallable {
+		t.Fatalf("default model unexpectedly inherited free status: %#v", byID["gpt-5.6-sol"])
 	}
 	if got := gw.resolveModel("claude-sonnet-4.6"); got != "anthropic:anthropic/claude-sonnet-4.6" {
 		t.Fatalf("resolved short Claude model = %q", got)
@@ -1177,6 +1320,33 @@ func TestConfiguredAliasOverridesImplicitDefaultShortName(t *testing.T) {
 	}
 	if got := gw.publicModelID("openai:openai/gpt-5.6-sol", "openai:openai/gpt-5.6-sol"); got != "gpt-5.6-sol" {
 		t.Fatalf("public compatibility model = %q", got)
+	}
+}
+
+func TestModelsMarksOnlyExplicitFreeAccountPublicIDs(t *testing.T) {
+	gw := &Gateway{cfg: &config.Config{Models: config.ModelsConfig{
+		Default: "z-ai:z-ai/glm-5.3-flash",
+		Aliases: map[string]string{
+			"claude-haiku-4.5": "anthropic:anthropic/claude-haiku-4.5",
+			"claude-sonnet-5":  "anthropic:anthropic/claude-sonnet-5",
+			"ox-alpha":         "openai:openai/gpt-5.6-sol",
+		},
+		FreeAccountModels: []string{"claude-haiku-4.5", "claude-sonnet-5"},
+	}}}
+
+	byID := make(map[string]openai.Model)
+	for _, model := range gw.Models() {
+		byID[model.ID] = model
+	}
+	for _, id := range []string{"claude-haiku-4.5", "claude-sonnet-5"} {
+		if !byID[id].FreeAccountCallable {
+			t.Fatalf("%s was not marked: %#v", id, byID[id])
+		}
+	}
+	for _, id := range []string{"glm-5.3-flash", "ox-alpha"} {
+		if byID[id].FreeAccountCallable {
+			t.Fatalf("%s was unexpectedly marked: %#v", id, byID[id])
+		}
 	}
 }
 

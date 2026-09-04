@@ -330,6 +330,13 @@ func appendResponsesTool(
 	seen map[string]struct{},
 	targets map[string]responsesToolTarget,
 ) error {
+	// Codex advertises server-executed tools alongside client tools. This
+	// gateway does not emulate them, so omit them without rejecting the usable
+	// client tool definitions in the same request.
+	switch tool.Type {
+	case "web_search", "code_interpreter", "mcp":
+		return nil
+	}
 	name := tool.Name
 	description := tool.Description
 	parameters := tool.Parameters

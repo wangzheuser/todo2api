@@ -68,15 +68,19 @@ func TestServiceMergesStaticLiveAndAliasModels(t *testing.T) {
 			APIKey: "key", ProjectID: "project-1",
 		}}},
 		Models: config.ModelsConfig{
-			Default: "anthropic:anthropic/claude-fable-5",
-			Aliases: map[string]string{"ox-alpha": "anthropic:anthropic/claude-fable-5"},
+			Default:           "anthropic:anthropic/claude-fable-5",
+			Aliases:           map[string]string{"ox-alpha": "anthropic:anthropic/claude-fable-5"},
+			FreeAccountModels: []string{"claude-fable-5"},
 		},
 	}
 	p, err := pool.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := NewService(p, cfg.Models.Aliases).Models()
+	service := NewService(p, cfg.Models.Aliases, cfg.Models.FreeAccountModels)
+	// Constructor copies configuration so later mutations cannot alter service behavior.
+	cfg.Models.FreeAccountModels[0] = "ox-alpha"
+	response := service.Models()
 	if response.Total != 54 || response.Available != 3 || !response.AvailabilityComplete {
 		t.Fatalf("response totals = %#v", response)
 	}
@@ -92,5 +96,11 @@ func TestServiceMergesStaticLiveAndAliasModels(t *testing.T) {
 	}
 	if !byID["ox-alpha"].Available || byID["ox-alpha"].CanonicalID != "anthropic/claude-fable-5" {
 		t.Fatalf("alias model = %#v", byID["ox-alpha"])
+	}
+	if !byID["claude-fable-5"].FreeAccountCallable {
+		t.Fatalf("verified public model = %#v", byID["claude-fable-5"])
+	}
+	if byID["ox-alpha"].FreeAccountCallable || byID["provider-model"].FreeAccountCallable {
+		t.Fatalf("alias or live-only model inherited free status: %#v", byID)
 	}
 }
