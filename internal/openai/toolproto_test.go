@@ -87,6 +87,38 @@ func TestParseToolCallsDoesNotExecuteAmbiguousAlternateText(t *testing.T) {
 	}
 }
 
+func TestParseToolCallsForToolsRecoversDeclaredWholeMessageWrapper(t *testing.T) {
+	tools := []Tool{{Function: FunctionDecl{Name: "Bash"}}}
+	input := `[assistant tool request] Bash({"command":"gh repo view example/repo","description":"inspect"})`
+	text, calls := ParseToolCallsForTools(input, tools)
+	if text != "" || len(calls) != 1 || calls[0].Function.Name != "Bash" {
+		t.Fatalf("text=%q calls=%#v", text, calls)
+	}
+	if !json.Valid([]byte(calls[0].Function.Arguments)) {
+		t.Fatalf("arguments = %q", calls[0].Function.Arguments)
+	}
+	_, again := ParseToolCallsForTools(input, tools)
+	if again[0].ID != calls[0].ID {
+		t.Fatalf("tool call IDs are not stable: %q != %q", again[0].ID, calls[0].ID)
+	}
+}
+
+func TestParseToolCallsForToolsRejectsUnsafeWrappers(t *testing.T) {
+	tools := []Tool{{Function: FunctionDecl{Name: "Read"}}}
+	inputs := []string{
+		`[assistant tool request] Bash({"command":"rm -rf /"})`,
+		`before [assistant tool request] Read({"path":"a.txt"})`,
+		`[assistant tool request] Read([])`,
+		`[assistant tool request] Read({"path":"a.txt"}) trailing`,
+	}
+	for _, input := range inputs {
+		text, calls := ParseToolCallsForTools(input, tools)
+		if text != input || calls != nil {
+			t.Fatalf("input %q produced text=%q calls=%#v", input, text, calls)
+		}
+	}
+}
+
 func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 	prompt := BuildToolSystemPrompt([]Tool{{
 		Type: "function",
@@ -132,6 +164,19 @@ func TestResolveClientToolAliases(t *testing.T) {
 	resolved := ResolveClientToolAliases(calls, tools)
 	if len(resolved) != 1 || resolved[0].Function.Name != "Bash" {
 		t.Fatalf("resolved calls = %#v", resolved)
+	}
+}
+
+func TestScopeToolCallIDsIsStableAndConversationSpecific(t *testing.T) {
+	calls := []ToolCall{{ID: "call_raw", Function: FunctionCall{Name: "Bash", Arguments: `{}`}}}
+	first := ScopeToolCallIDs(calls, "todo-1")
+	again := ScopeToolCallIDs(calls, "todo-1")
+	other := ScopeToolCallIDs(calls, "todo-2")
+	if first[0].ID != again[0].ID || first[0].ID == other[0].ID {
+		t.Fatalf("scoped IDs first=%q again=%q other=%q", first[0].ID, again[0].ID, other[0].ID)
+	}
+	if calls[0].ID != "call_raw" {
+		t.Fatalf("input calls mutated: %#v", calls)
 	}
 }
 
@@ -201,6 +246,22 @@ func TestToolCallStreamFilterSuppressesObservedAlternateVariants(t *testing.T) {
 		if got.Len() != 0 {
 			t.Fatalf("fragments %#v leaked %q", fragments, got.String())
 		}
+	}
+}
+
+func TestToolCallStreamFilterSuppressesDeclaredWrapper(t *testing.T) {
+	filter := NewToolCallStreamFilter([]Tool{{Function: FunctionDecl{Name: "Bash"}}})
+	fragments := []string{
+		`[assistant tool `,
+		`request] Bash({"command":"git status --short"})`,
+	}
+	var got strings.Builder
+	for _, fragment := range fragments {
+		got.WriteString(filter.Push(fragment))
+	}
+	got.WriteString(filter.Flush())
+	if got.Len() != 0 {
+		t.Fatalf("declared wrapper leaked %q", got.String())
 	}
 }
 

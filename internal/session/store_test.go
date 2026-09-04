@@ -18,4 +18,7 @@ func TestStoreIndexesHistoryAndTodoID(t *testing.T) {
 	if got, ok := store.ToolName("todo-1", "call-1"); !ok || got != "read_file" {
 		t.Fatalf("tool name lookup = %q, %v", got, ok)
 	}
+	if got, ok := store.GetByToolCallID("call-1"); !ok || got != want {
+		t.Fatalf("tool call lookup = %#v, %v", got, ok)
+	}
 }

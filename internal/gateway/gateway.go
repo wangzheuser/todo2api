@@ -237,7 +237,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			return nil, err
 		}
 		agent, filteredTools := g.accountRequestSettings(runtime, runnerModel, req)
-		content := followUpBody(req.Messages)
+		content := followUpBody(req.Messages, req.Tools)
 		if content == "" {
 			return nil, fmt.Errorf("resumed request has no new user or tool-result messages")
 		}
@@ -278,7 +278,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				return emit(StreamEvent{Type: StreamTextDelta, Model: publicModel, TodoID: todoID, Delta: delta})
 			}
 		}
-		result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, previousAssistantSignature, emitText)
+		result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, previousAssistantSignature, emitText, req.Tools)
 		if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 			log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 			err = ErrUpstreamModelMismatch
@@ -306,7 +306,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			if err != nil {
 				return nil, fmt.Errorf("rebase empty todo %s: %w", oldTodoID, err)
 			}
-			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText)
+			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 				err = ErrUpstreamModelMismatch
@@ -370,7 +370,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 					})
 				}
 			}
-			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText)
+			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 				err = ErrUpstreamModelMismatch
@@ -435,8 +435,8 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 		return nil, fmt.Errorf("upstream returned an empty todo id")
 	}
 	content := result.Content
-	text, calls := openai.ParseToolCalls(content)
-	calls = openai.ResolveClientToolAliases(calls, req.Tools)
+	text, calls := openai.ParseToolCallsForTools(content, req.Tools)
+	calls = openai.ScopeToolCallIDs(calls, todoID)
 
 	assistant := openai.ChatMessage{Role: "assistant", Content: content}
 	if len(calls) > 0 {
@@ -484,7 +484,7 @@ func (g *Gateway) startNewConversationExcept(
 	runnerModel string,
 	excluded map[*pool.Account]struct{},
 ) (*pool.Account, pool.AccountRuntime, *upstream.Subscription, string, error) {
-	content := openai.FlattenTurn(req.Messages)
+	content := openai.FlattenTurnWithTools(req.Messages, req.Tools)
 	attempts := g.pool.Len()
 	if attempts > maxNewConversationAttempts {
 		attempts = maxNewConversationAttempts
@@ -684,6 +684,8 @@ func isTransientUpstreamDetail(detail string) bool {
 		"stream error:",
 		"stream id",
 		"received from peer",
+		"websocket: close 1012",
+		"server restarting",
 	} {
 		if strings.Contains(detail, marker) {
 			return true
@@ -792,12 +794,22 @@ func (g *Gateway) sessionEntry(req openai.ChatRequest) (session.Entry, bool) {
 		}
 	}
 	if key := conversationKey(req.System, req.Messages); key != "" {
-		return g.sess.Get(key)
+		if entry, ok := g.sess.Get(key); ok {
+			return entry, true
+		}
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		message := req.Messages[i]
+		if message.Role == "tool" && message.ToolCallID != "" {
+			if entry, ok := g.sess.GetByToolCallID(message.ToolCallID); ok {
+				return entry, true
+			}
+		}
 	}
 	return session.Entry{}, false
 }
 
-func followUpBody(msgs []openai.ChatMessage) string {
+func followUpBody(msgs []openai.ChatMessage, tools []openai.Tool) string {
 	turn := followUpMessages(msgs)
 	if len(turn) == 0 {
 		return ""
@@ -806,12 +818,12 @@ func followUpBody(msgs []openai.ChatMessage) string {
 		// The turn is a pure tool-result follow-up: render it with the full
 		// history so tool names are recovered from the preceding assistant
 		// tool_calls.
-		return openai.FormatToolResults(msgs)
+		return openai.FormatToolResultsWithTools(msgs, tools)
 	}
 	// A mixed turn (user content/images plus tool results) must keep all of
 	// it; sending only the trailing tool results would drop this turn's user
 	// message and image placeholders.
-	return openai.FlattenTurn(turn)
+	return openai.FlattenTurnWithTools(turn, tools)
 }
 
 // followUpMessages returns the current follow-up turn: everything after the
@@ -877,13 +889,14 @@ func (g *Gateway) waitAssistant(
 	todoID string,
 	previousAssistantSignature string,
 	emit func(string) error,
+	tools []openai.Tool,
 ) (assistantResult, error) {
 	events := make(chan upstream.Event, 32)
 	errc := make(chan error, 1)
 	go func() { errc <- sub.Subscribe(ctx, todoID, events) }()
 
 	var buf strings.Builder
-	var filter openai.ToolCallStreamFilter
+	filter := openai.NewToolCallStreamFilter(tools)
 	pendingBlocks := make(map[string]struct{})
 	firstResponseTimer := time.NewTimer(g.firstResponseTimeout())
 	restTicker := time.NewTicker(g.restPollInterval())

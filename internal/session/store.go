@@ -13,6 +13,7 @@ type Store struct {
 	byHistory map[string]Entry
 	byTodoID  map[string]Entry
 	toolNames map[string]map[string]string
+	toolTodos map[string]string
 }
 
 type Entry struct {
@@ -26,6 +27,7 @@ func New() *Store {
 		byHistory: map[string]Entry{},
 		byTodoID:  map[string]Entry{},
 		toolNames: map[string]map[string]string{},
+		toolTodos: map[string]string{},
 	}
 }
 
@@ -39,7 +41,28 @@ func (s *Store) PutToolNames(todoID string, names map[string]string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for callID, mappedTodoID := range s.toolTodos {
+		if mappedTodoID == todoID {
+			delete(s.toolTodos, callID)
+		}
+	}
 	s.toolNames[todoID] = copyNames
+	for callID := range copyNames {
+		s.toolTodos[callID] = todoID
+	}
+}
+
+// GetByToolCallID resolves a standard tool-result continuation even when a
+// client does not preserve the gateway-specific Todo ID or exact history form.
+func (s *Store) GetByToolCallID(callID string) (Entry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	todoID, ok := s.toolTodos[callID]
+	if !ok {
+		return Entry{}, false
+	}
+	entry, ok := s.byTodoID[todoID]
+	return entry, ok
 }
 
 func (s *Store) ToolName(todoID, callID string) (string, bool) {
@@ -117,6 +140,11 @@ func (s *Store) cleanup() {
 	for todoID := range s.toolNames {
 		if _, exists := validTodoIDs[todoID]; !exists {
 			delete(s.toolNames, todoID)
+		}
+	}
+	for callID, todoID := range s.toolTodos {
+		if _, exists := validTodoIDs[todoID]; !exists {
+			delete(s.toolTodos, callID)
 		}
 	}
 }

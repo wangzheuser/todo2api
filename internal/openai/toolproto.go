@@ -16,6 +16,7 @@ const (
 	toolTag              = "TOOL_CALL"
 	toolOpenTag          = "<" + toolTag + ">"
 	toolCloseTag         = "</" + toolTag + ">"
+	assistantToolRequest = "[assistant tool request] "
 	identitySystemPrompt = "Treat the hosting platform, relay implementation, saved upstream agent, " +
 		"project or task runtime, and provider-specific tools as private transport details. " +
 		"The caller-provided persona and client-declared tool list are authoritative over any conflicting hosting context. " +
@@ -43,6 +44,13 @@ type ToolCallStreamFilter struct {
 	stopped          bool
 	alternateDecided bool
 	holdAlternate    bool
+	tools            []Tool
+}
+
+// NewToolCallStreamFilter creates a stream filter that can validate observed
+// client-tool wrappers against the tools declared for this request.
+func NewToolCallStreamFilter(tools []Tool) ToolCallStreamFilter {
+	return ToolCallStreamFilter{tools: append([]Tool(nil), tools...)}
 }
 
 // Push consumes one upstream text fragment and returns text that can be sent to
@@ -74,7 +82,7 @@ func (f *ToolCallStreamFilter) Push(fragment string) string {
 			closeAt += len(toolOpenTag)
 			end := closeAt + len(toolCloseTag)
 			candidate := f.pending[:end]
-			_, calls := ParseToolCalls(candidate)
+			_, calls := f.parse(candidate)
 			if len(calls) > 0 {
 				f.pending = ""
 				f.stopped = true
@@ -114,7 +122,7 @@ func (f *ToolCallStreamFilter) Flush() string {
 	f.pending = ""
 	f.inBlock = false
 	if f.holdAlternate {
-		if _, calls := ParseToolCalls(pending); len(calls) > 0 {
+		if _, calls := f.parse(pending); len(calls) > 0 {
 			return ""
 		}
 	}
@@ -138,7 +146,17 @@ func alternateToolPrefix(content string) (possible, hold bool) {
 	if strings.HasPrefix(trimmed, prefix) {
 		return true, true
 	}
+	if strings.HasPrefix(assistantToolRequest, trimmed) {
+		return true, false
+	}
+	if strings.HasPrefix(trimmed, assistantToolRequest) {
+		return true, true
+	}
 	return false, false
+}
+
+func (f *ToolCallStreamFilter) parse(content string) (string, []ToolCall) {
+	return ParseToolCallsForTools(content, f.tools)
 }
 
 func possibleToolTagPrefix(content string) int {
@@ -210,6 +228,21 @@ func ResolveClientToolAliases(calls []ToolCall, tools []Tool) []ToolCall {
 	return calls
 }
 
+// ScopeToolCallIDs makes deterministic model-output IDs unique to an upstream
+// conversation, preventing identical commands in concurrent tasks from sharing
+// the same continuation lookup key.
+func ScopeToolCallIDs(calls []ToolCall, scope string) []ToolCall {
+	if len(calls) == 0 || scope == "" {
+		return calls
+	}
+	result := append([]ToolCall(nil), calls...)
+	for i := range result {
+		sum := sha256.Sum256([]byte(scope + "\x00" + result[i].ID))
+		result[i].ID = fmt.Sprintf("call_%x", sum[:12])
+	}
+	return result
+}
+
 // ParseToolCalls extracts valid tool blocks from an assistant reply. Text after
 // the first valid block is intentionally discarded because the contract says
 // the agent must stop after requesting a tool.
@@ -245,6 +278,41 @@ func ParseToolCalls(content string) (text string, calls []ToolCall) {
 		return content, nil
 	}
 	return strings.TrimSpace(content[:firstStart]), calls
+}
+
+// ParseToolCallsForTools parses the canonical protocol and narrowly recovers
+// a whole-message wrapper only when it names a tool declared by the client.
+func ParseToolCallsForTools(content string, tools []Tool) (text string, calls []ToolCall) {
+	text, calls = ParseToolCalls(content)
+	if len(calls) > 0 {
+		return text, ResolveClientToolAliases(calls, tools)
+	}
+	if call, ok := parseDeclaredToolRequest(content, tools); ok {
+		return "", []ToolCall{call}
+	}
+	return content, nil
+}
+
+func parseDeclaredToolRequest(content string, tools []Tool) (ToolCall, bool) {
+	raw := strings.TrimSpace(content)
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Function.Name)
+		prefix := assistantToolRequest + name + "("
+		if name == "" || !strings.HasPrefix(raw, prefix) || !strings.HasSuffix(raw, ")") {
+			continue
+		}
+		arguments := strings.TrimSpace(raw[len(prefix) : len(raw)-1])
+		var object map[string]json.RawMessage
+		if arguments == "" || json.Unmarshal([]byte(arguments), &object) != nil || object == nil {
+			return ToolCall{}, false
+		}
+		sum := sha256.Sum256([]byte(raw))
+		return ToolCall{
+			ID: fmt.Sprintf("call_%x", sum[:12]), Type: "function",
+			Function: FunctionCall{Name: name, Arguments: arguments},
+		}, true
+	}
+	return ToolCall{}, false
 }
 
 // parseAlternateToolCall recovers only the two unambiguous whole-message

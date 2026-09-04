@@ -155,7 +155,7 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 	if got := mock.createBody["content"]; got != "Read a.txt" {
 		t.Fatalf("create content = %#v", got)
 	}
-	if got := mock.addBodies[0]["content"]; got != "[tool result for read_file]\nhello from file" {
+	if got := mock.addBodies[0]["content"]; got != "[tool result for client_tool_0]\nhello from file" {
 		t.Fatalf("tool follow-up content = %#v", got)
 	}
 	if got := mock.addBodies[1]["content"]; got != "Say it again." {
@@ -845,6 +845,11 @@ func TestAccountFailurePolicy(t *testing.T) {
 			action: accountFailureCooldown, min: 20 * time.Second,
 		},
 		{
+			name:   "websocket service restart",
+			err:    errors.New("frontend ws read: websocket: close 1012: Server restarting"),
+			action: accountFailureCooldown, min: 20 * time.Second,
+		},
+		{
 			name:   "empty completion",
 			err:    fmt.Errorf("fallback exhausted: %w", ErrEmptyCompletion),
 			action: accountFailureCooldown, min: 20 * time.Second,
@@ -1202,6 +1207,24 @@ func TestConversationKeyIncludesSystemPrompt(t *testing.T) {
 	}
 	if strings.EqualFold(conversationKey("be concise", messages), conversationKey("be detailed", messages)) {
 		t.Fatal("conversation key ignored the system prompt")
+	}
+}
+
+func TestSessionEntryFallsBackToToolCallID(t *testing.T) {
+	store := session.New()
+	want := session.Entry{TodoID: "todo-1", Account: 2}
+	store.Put("original-history", want)
+	store.PutToolNames("todo-1", map[string]string{"call-1": "Bash"})
+	gw := &Gateway{sess: store}
+	req := openai.ChatRequest{Messages: []openai.ChatMessage{
+		{Role: "user", Content: "inspect the repository"},
+		{Role: "assistant", Content: "client-reencoded history"},
+		{Role: "tool", ToolCallID: "call-1", Content: "clean"},
+	}}
+
+	got, ok := gw.sessionEntry(req)
+	if !ok || got != want {
+		t.Fatalf("session entry = %#v, %v", got, ok)
 	}
 }
 

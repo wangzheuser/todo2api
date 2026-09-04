@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -37,6 +38,12 @@ func NormalizeInstructions(req ChatRequest) ChatRequest {
 // FlattenTurn renders the messages that must be sent to the upstream for the
 // current turn. tool-result messages are formatted so the agent can read them.
 func FlattenTurn(msgs []ChatMessage) string {
+	return FlattenTurnWithTools(msgs, nil)
+}
+
+// FlattenTurnWithTools renders prior tool calls with the same canonical,
+// neutral protocol taught to the upstream model for the current request.
+func FlattenTurnWithTools(msgs []ChatMessage, tools []Tool) string {
 	var b strings.Builder
 	toolNames := toolNamesByID(msgs)
 	for i, m := range msgs {
@@ -45,15 +52,18 @@ func FlattenTurn(msgs []ChatMessage) string {
 			b.WriteString("[system] " + m.Content)
 		case "assistant":
 			if len(m.ToolCalls) > 0 {
-				b.WriteString("[assistant tool request] ")
-				for _, tc := range m.ToolCalls {
-					fmt.Fprintf(&b, "%s(%s) ", tc.Function.Name, tc.Function.Arguments)
+				for callIndex, tc := range m.ToolCalls {
+					if callIndex > 0 {
+						b.WriteByte('\n')
+					}
+					b.WriteString(canonicalHistoryToolCall(tc, tools))
 				}
 			} else {
 				b.WriteString("[assistant] " + m.Content)
 			}
 		case "tool":
-			fmt.Fprintf(&b, "[tool result for %s]\n%s", toolResultName(m, toolNames), m.Content)
+			name := historyToolName(toolResultName(m, toolNames), tools)
+			fmt.Fprintf(&b, "[tool result for %s]\n%s", name, m.Content)
 		default:
 			b.WriteString(m.Content)
 		}
@@ -77,6 +87,12 @@ func LastToolResults(msgs []ChatMessage) []ChatMessage {
 // Pass the complete OpenAI history so tool names can be recovered from the
 // preceding assistant tool_calls when tool result messages omit name.
 func FormatToolResults(msgs []ChatMessage) string {
+	return FormatToolResultsWithTools(msgs, nil)
+}
+
+// FormatToolResultsWithTools uses the same neutral aliases as the canonical
+// tool protocol so follow-up results cannot reinforce client-specific syntax.
+func FormatToolResultsWithTools(msgs []ChatMessage, tools []Tool) string {
 	results := LastToolResults(msgs)
 	if len(results) == 0 {
 		results = msgs
@@ -84,12 +100,36 @@ func FormatToolResults(msgs []ChatMessage) string {
 	toolNames := toolNamesByID(msgs)
 	var b strings.Builder
 	for i, m := range results {
-		fmt.Fprintf(&b, "[tool result for %s]\n%s", toolResultName(m, toolNames), m.Content)
+		name := historyToolName(toolResultName(m, toolNames), tools)
+		fmt.Fprintf(&b, "[tool result for %s]\n%s", name, m.Content)
 		if i < len(results)-1 {
 			b.WriteString("\n\n")
 		}
 	}
 	return b.String()
+}
+
+func canonicalHistoryToolCall(call ToolCall, tools []Tool) string {
+	arguments := strings.TrimSpace(call.Function.Arguments)
+	if arguments == "" || arguments == "null" {
+		arguments = "{}"
+	}
+	if !json.Valid([]byte(arguments)) {
+		arguments = "{}"
+	}
+	payload, _ := json.Marshal(wireToolCall{
+		Name: historyToolName(call.Function.Name, tools), Arguments: json.RawMessage(arguments),
+	})
+	return toolOpenTag + string(payload) + toolCloseTag
+}
+
+func historyToolName(name string, tools []Tool) string {
+	for i, tool := range tools {
+		if tool.Function.Name == name || name == clientToolAlias(i) {
+			return clientToolAlias(i)
+		}
+	}
+	return name
 }
 
 func toolNamesByID(msgs []ChatMessage) map[string]string {
