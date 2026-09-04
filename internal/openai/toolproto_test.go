@@ -49,6 +49,44 @@ func TestParseToolCallsRejectsMalformedBlock(t *testing.T) {
 	}
 }
 
+func TestParseToolCallsRecoversObservedWholeMessageVariants(t *testing.T) {
+	inputs := []string{
+		`{"name":"client_tool_7","arguments":{"path":"PROJECT_STRUCTURE.md"}}`,
+		`TOOL_CALL name="client_tool_1" arguments={"command":"git status --short"}`,
+	}
+	for _, input := range inputs {
+		text, calls := ParseToolCalls(input)
+		if text != "" || len(calls) != 1 {
+			t.Fatalf("input %q produced text=%q calls=%#v", input, text, calls)
+		}
+		if !strings.HasPrefix(calls[0].Function.Name, "client_tool_") || !json.Valid([]byte(calls[0].Function.Arguments)) {
+			t.Fatalf("input %q produced invalid call %#v", input, calls[0])
+		}
+		_, again := ParseToolCalls(input)
+		if again[0].ID != calls[0].ID {
+			t.Fatalf("input %q produced unstable IDs", input)
+		}
+	}
+}
+
+func TestParseToolCallsDoesNotExecuteAmbiguousAlternateText(t *testing.T) {
+	inputs := []string{
+		`before {"name":"client_tool_1","arguments":{}}`,
+		`{"name":"Read","arguments":{"path":"a.txt"}}`,
+		`{"name":"client_tool_x","arguments":{}}`,
+		`{"name":"client_tool_1","arguments":[]}`,
+		`{"name":"client_tool_1","arguments":{},"extra":true}`,
+		`TOOL_CALL name="client_tool_1" arguments={} trailing`,
+		`ls("any2api/aihubmix")`,
+	}
+	for _, input := range inputs {
+		text, calls := ParseToolCalls(input)
+		if text != input || calls != nil {
+			t.Fatalf("input %q produced text=%q calls=%#v", input, text, calls)
+		}
+	}
+}
+
 func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 	prompt := BuildToolSystemPrompt([]Tool{{
 		Type: "function",
@@ -63,6 +101,9 @@ func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 		"available through a client-executed tool protocol",
 		"If the user explicitly asks for a listed tool, you must request it",
 		"Never announce, promise, or describe a tool use in prose",
+		"Never output a bare JSON tool request",
+		"tool_name(...) shorthand",
+		"simulated tool result",
 		"does not mean that they are offline, disconnected, expired, or unavailable",
 		"Only an explicit error result from that exact tool proves that the call failed",
 		"capability catalog search with no match",
@@ -142,6 +183,35 @@ func TestToolCallStreamFilterOnlyDelaysPossiblePrefix(t *testing.T) {
 	}
 	if got := filter.Push("X ordinary"); got != "<TOX ordinary" {
 		t.Fatalf("disproved tag fragment = %q", got)
+	}
+}
+
+func TestToolCallStreamFilterSuppressesObservedAlternateVariants(t *testing.T) {
+	inputs := [][]string{
+		{`{"na`, `me":"client_tool_7","arguments":{"path":"PROJECT_STRUCTURE.md"}}`},
+		{`TOOL_`, `CALL name="client_tool_1" arguments={"command":"git status --short"}`},
+	}
+	for _, fragments := range inputs {
+		var filter ToolCallStreamFilter
+		var got strings.Builder
+		for _, fragment := range fragments {
+			got.WriteString(filter.Push(fragment))
+		}
+		got.WriteString(filter.Flush())
+		if got.Len() != 0 {
+			t.Fatalf("fragments %#v leaked %q", fragments, got.String())
+		}
+	}
+}
+
+func TestToolCallStreamFilterReleasesOrdinaryJSON(t *testing.T) {
+	input := `{"name":"report","value":1}`
+	var filter ToolCallStreamFilter
+	if got := filter.Push(input); got != "" {
+		t.Fatalf("ordinary JSON was released before validation: %q", got)
+	}
+	if got := filter.Flush(); got != input {
+		t.Fatalf("ordinary JSON = %q", got)
 	}
 }
 

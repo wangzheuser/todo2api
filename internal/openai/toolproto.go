@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 )
 
@@ -36,9 +38,11 @@ type toolBlock struct {
 // to do so while withholding valid TOOL_CALL protocol blocks. A filter is used
 // for one assistant turn.
 type ToolCallStreamFilter struct {
-	pending string
-	inBlock bool
-	stopped bool
+	pending          string
+	inBlock          bool
+	stopped          bool
+	alternateDecided bool
+	holdAlternate    bool
 }
 
 // Push consumes one upstream text fragment and returns text that can be sent to
@@ -48,6 +52,17 @@ func (f *ToolCallStreamFilter) Push(fragment string) string {
 		return ""
 	}
 	f.pending += fragment
+	if !f.alternateDecided {
+		possible, hold := alternateToolPrefix(f.pending)
+		if possible {
+			f.holdAlternate = hold
+			return ""
+		}
+		f.alternateDecided = true
+	}
+	if f.holdAlternate {
+		return ""
+	}
 
 	var out strings.Builder
 	for {
@@ -98,7 +113,32 @@ func (f *ToolCallStreamFilter) Flush() string {
 	pending := f.pending
 	f.pending = ""
 	f.inBlock = false
+	if f.holdAlternate {
+		if _, calls := ParseToolCalls(pending); len(calls) > 0 {
+			return ""
+		}
+	}
 	return pending
+}
+
+// alternateToolPrefix delays only the two observed whole-message protocol
+// variants until they can be validated at the end of the assistant turn.
+func alternateToolPrefix(content string) (possible, hold bool) {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	if trimmed == "" {
+		return true, false
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		return true, true
+	}
+	prefix := toolTag + " name="
+	if strings.HasPrefix(prefix, trimmed) {
+		return true, false
+	}
+	if strings.HasPrefix(trimmed, prefix) {
+		return true, true
+	}
+	return false, false
 }
 
 func possibleToolTagPrefix(content string) int {
@@ -133,6 +173,7 @@ func BuildToolSystemPrompt(tools []Tool) string {
 	b.WriteString("The list is the authoritative source of tools you may request in this turn. Each tool has a neutral alias to prevent confusion with hosting-platform tools. ")
 	b.WriteString("If the user explicitly asks for a listed tool, you must request it. ")
 	b.WriteString("Never announce, promise, or describe a tool use in prose: any intended tool use must be the TOOL_CALL block itself. ")
+	b.WriteString("Never output a bare JSON tool request, TOOL_CALL name=... arguments=..., tool_name(...) shorthand, or a simulated tool result. ")
 	b.WriteString("To use one, output exactly one block with no Markdown fence or surrounding prose:\n")
 	b.WriteString(toolOpenTag + "{\"name\":\"<tool>\",\"arguments\":{...}}" + toolCloseTag + "\n")
 	b.WriteString("Then stop immediately. The client will execute the call and return its result in the next turn. ")
@@ -198,9 +239,79 @@ func ParseToolCalls(content string) (text string, calls []ToolCall) {
 		})
 	}
 	if len(calls) == 0 {
+		if call, ok := parseAlternateToolCall(content); ok {
+			return "", []ToolCall{call}
+		}
 		return content, nil
 	}
 	return strings.TrimSpace(content[:firstStart]), calls
+}
+
+// parseAlternateToolCall recovers only the two unambiguous whole-message
+// variants observed in production. Natural-language surroundings remain text.
+func parseAlternateToolCall(content string) (ToolCall, bool) {
+	raw := strings.TrimSpace(content)
+	if raw == "" {
+		return ToolCall{}, false
+	}
+
+	var wc wireToolCall
+	if strings.HasPrefix(raw, "{") {
+		if err := decodeWireToolCall(raw, &wc); err != nil {
+			return ToolCall{}, false
+		}
+	} else {
+		const prefix = toolTag + " name="
+		if !strings.HasPrefix(raw, prefix) {
+			return ToolCall{}, false
+		}
+		rest := raw[len(prefix):]
+		decoder := json.NewDecoder(strings.NewReader(rest))
+		if err := decoder.Decode(&wc.Name); err != nil || wc.Name == "" {
+			return ToolCall{}, false
+		}
+		rest = strings.TrimSpace(rest[decoder.InputOffset():])
+		const argumentsPrefix = "arguments="
+		if !strings.HasPrefix(rest, argumentsPrefix) {
+			return ToolCall{}, false
+		}
+		wc.Arguments = json.RawMessage(strings.TrimSpace(rest[len(argumentsPrefix):]))
+	}
+
+	if !validAlternateWireCall(wc) {
+		return ToolCall{}, false
+	}
+	args := strings.TrimSpace(string(wc.Arguments))
+	sum := sha256.Sum256([]byte(raw))
+	return ToolCall{
+		ID:       fmt.Sprintf("call_%x", sum[:12]),
+		Type:     "function",
+		Function: FunctionCall{Name: wc.Name, Arguments: args},
+	}, true
+}
+
+func decodeWireToolCall(raw string, wc *wireToolCall) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(wc); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("tool call has trailing JSON")
+	}
+	return nil
+}
+
+func validAlternateWireCall(wc wireToolCall) bool {
+	if !strings.HasPrefix(wc.Name, "client_tool_") {
+		return false
+	}
+	index, err := strconv.Atoi(strings.TrimPrefix(wc.Name, "client_tool_"))
+	if err != nil || index < 0 {
+		return false
+	}
+	var arguments map[string]json.RawMessage
+	return len(wc.Arguments) > 0 && json.Unmarshal(wc.Arguments, &arguments) == nil && arguments != nil
 }
 
 // HasToolCall reports whether a reply contains at least one valid tool block.
