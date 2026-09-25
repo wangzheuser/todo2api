@@ -28,6 +28,7 @@ models:
   default: "openai:openai/gpt-5.6-sol"
   aliases:
     gpt-5.6-sol: "openai:openai/gpt-5.6-sol"
+    ox-alpha: "anthropic:anthropic/claude-sonnet-5"
   free_account_models:
     - "claude-haiku-4.5"
     - "claude-sonnet-5"

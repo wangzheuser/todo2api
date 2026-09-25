@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -13,12 +14,14 @@ import (
 
 	"todo2api/internal/config"
 	"todo2api/internal/gateway"
+	"todo2api/internal/observability"
 	"todo2api/internal/openai"
 )
 
 type Server struct {
-	cfg *config.Config
-	gw  gatewayClient
+	cfg        *config.Config
+	gw         gatewayClient
+	readyCheck func() bool
 }
 
 // gatewayClient is the subset of *gateway.Gateway the HTTP layer depends on.
@@ -43,6 +46,77 @@ func New(cfg *config.Config, gw *gateway.Gateway) *Server {
 	return &Server{cfg: cfg, gw: client}
 }
 
+// SetReadyCheck makes health and inference endpoints wait for the account pool
+// warmup pass. Tests and embedded callers may leave it unset.
+func (s *Server) SetReadyCheck(check func() bool) { s.readyCheck = check }
+
+// RequestLogging records one redacted access line after the handler completes.
+// It preserves streaming support while keeping request bodies and credentials
+// out of logs.
+func RequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := anthropicRequestID(r)
+		r = r.WithContext(observability.WithRequestID(r.Context(), requestID))
+		w.Header().Set("X-Request-ID", requestID)
+		recorder := &accessRecorder{ResponseWriter: w}
+		started := time.Now()
+		next.ServeHTTP(recorder, r)
+		log.Printf("http request id=%s method=%s path=%s status=%d bytes=%d duration_ms=%d",
+			requestID, r.Method, r.URL.Path, recorder.status(), recorder.bytes, time.Since(started).Milliseconds())
+	})
+}
+
+type accessRecorder struct {
+	http.ResponseWriter
+	code  int
+	bytes int
+}
+
+func (r *accessRecorder) WriteHeader(code int) {
+	if r.code != 0 {
+		return
+	}
+	r.code = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *accessRecorder) Write(data []byte) (int, error) {
+	if r.code == 0 {
+		r.code = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(data)
+	r.bytes += n
+	return n, err
+}
+
+func (r *accessRecorder) Flush() {
+	if r.code == 0 {
+		r.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *accessRecorder) status() int {
+	if r.code == 0 {
+		return http.StatusOK
+	}
+	return r.code
+}
+
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) bool {
+	if s.readyCheck == nil || s.readyCheck() {
+		return true
+	}
+	requestID := observability.RequestID(r.Context())
+	w.Header().Set("X-Todo2API-Ready", "false")
+	w.Header().Set("Retry-After", "5")
+	log.Printf("readiness rejected request id=%s method=%s path=%s", requestID, r.Method, r.URL.Path)
+	writeErr(w, http.StatusServiceUnavailable, "no ready upstream account; account pool is warming up")
+	return false
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.Register(mux)
@@ -51,6 +125,10 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if !s.ready(w, r) {
+			return
+		}
+		w.Header().Set("X-Todo2API-Ready", "true")
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/v1/models", s.auth(s.handleModels))
@@ -137,6 +215,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	requestID := anthropicRequestID(r)
 	w.Header().Set("X-Request-ID", requestID)
+	r = r.WithContext(observability.WithRequestID(r.Context(), requestID))
+	if !s.ready(w, r) {
+		return
+	}
 	var req openai.ChatRequest
 	if err := decodeJSONBody(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -163,6 +245,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "gateway is not configured")
 		return
 	}
+	log.Printf("chat request id=%s model=%s stream=%t messages=%d tools=%d resume=%t",
+		requestID, req.Model, req.Stream, len(req.Messages), len(req.Tools), strings.TrimSpace(req.Metadata[openai.TodoIDMetadataKey]) != "")
 	if todoID := strings.TrimSpace(r.Header.Get(todoIDHeader)); todoID != "" {
 		if req.Metadata == nil {
 			req.Metadata = map[string]string{}
@@ -184,9 +268,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := s.gw.Complete(ctx, req)
 	if err != nil {
+		logGatewayFailure(r, "chat", req.Model, err)
 		writeGatewayErr(w, err)
 		return
 	}
+	logGatewaySuccess(r, "chat", reply)
 	w.Header().Set(todoIDHeader, reply.TodoID)
 
 	writeJSON(w, http.StatusOK, buildResponse(reply))
@@ -319,6 +405,7 @@ func (s *Server) streamChat(w http.ResponseWriter, flusher http.Flusher, ctx con
 	}
 	reply, err := s.gw.Stream(ctx, req, stream.onGatewayEvent)
 	if err != nil {
+		logGatewayFailureFromContext(ctx, "chat_stream", req.Model, err)
 		if !stream.started {
 			writeGatewayErr(w, err)
 			return
@@ -327,6 +414,7 @@ func (s *Server) streamChat(w http.ResponseWriter, flusher http.Flusher, ctx con
 		_ = stream.done()
 		return
 	}
+	logGatewaySuccessFromContext(ctx, "chat_stream", reply)
 	_ = stream.finish(reply)
 }
 
@@ -483,4 +571,28 @@ func writeGatewayErr(w http.ResponseWriter, err error) {
 
 func writeAnthropicGatewayErr(w http.ResponseWriter, err error) {
 	writeAnthropicErr(w, gatewayErrorStatus(w, err), "api_error", err.Error())
+}
+
+func logGatewaySuccess(r *http.Request, endpoint string, reply *gateway.Reply) {
+	logGatewaySuccessFromContext(r.Context(), endpoint, reply)
+}
+
+func logGatewaySuccessFromContext(ctx context.Context, endpoint string, reply *gateway.Reply) {
+	if reply == nil {
+		return
+	}
+	log.Printf("gateway success id=%s endpoint=%s model=%s todo_id=%s tool_calls=%d",
+		observability.RequestID(ctx), endpoint, reply.Model, reply.TodoID, len(reply.ToolCalls))
+}
+
+func logGatewayFailure(r *http.Request, endpoint, model string, err error) {
+	logGatewayFailureFromContext(r.Context(), endpoint, model, err)
+}
+
+func logGatewayFailureFromContext(ctx context.Context, endpoint, model string, err error) {
+	if err == nil {
+		return
+	}
+	log.Printf("gateway failure id=%s endpoint=%s model=%s error_type=%T error=%v",
+		observability.RequestID(ctx), endpoint, model, err, err)
 }

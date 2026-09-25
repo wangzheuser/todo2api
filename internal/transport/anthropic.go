@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"todo2api/internal/gateway"
+	"todo2api/internal/observability"
 	"todo2api/internal/openai"
 )
 
@@ -290,6 +291,10 @@ func writeAnthropicDecodeError(w http.ResponseWriter, r *http.Request, requestID
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	requestID := anthropicRequestID(r)
 	w.Header().Set("X-Request-ID", requestID)
+	r = r.WithContext(observability.WithRequestID(r.Context(), requestID))
+	if !s.ready(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeAnthropicErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
 		return
@@ -309,6 +314,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicErr(w, http.StatusServiceUnavailable, "api_error", "gateway is not configured")
 		return
 	}
+	log.Printf("messages request id=%s model=%s stream=%t messages=%d tools=%d resume=%t",
+		requestID, chatReq.Model, req.Stream, len(chatReq.Messages), len(chatReq.Tools), requestTodoID(r, req.Metadata) != "")
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Upstream.PollTimeout+30*time.Second)
 	defer cancel()
@@ -320,9 +327,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, err := s.gw.Complete(ctx, chatReq)
 	if err != nil {
+		logGatewayFailure(r, "messages", chatReq.Model, err)
 		writeAnthropicGatewayErr(w, err)
 		return
 	}
+	logGatewaySuccess(r, "messages", reply)
 	w.Header().Set(todoIDHeader, reply.TodoID)
 
 	resp := buildAnthropicResponse(req.Model, reply)
@@ -332,6 +341,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMessagesCountTokens(w http.ResponseWriter, r *http.Request) {
 	requestID := anthropicRequestID(r)
 	w.Header().Set("X-Request-ID", requestID)
+	r = r.WithContext(observability.WithRequestID(r.Context(), requestID))
 	if r.Method != http.MethodPost {
 		writeAnthropicErr(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
 		return
@@ -686,6 +696,7 @@ func (s *Server) streamAnthropic(
 	stream := &anthropicSSE{w: w, flusher: flusher, requestedModel: req.Model}
 	reply, err := s.gw.Stream(ctx, chatReq, stream.onGatewayEvent)
 	if err != nil {
+		logGatewayFailureFromContext(ctx, "messages_stream", chatReq.Model, err)
 		if !stream.started {
 			writeAnthropicGatewayErr(w, err)
 			return
@@ -693,6 +704,7 @@ func (s *Server) streamAnthropic(
 		_ = stream.emitError(err)
 		return
 	}
+	logGatewaySuccessFromContext(ctx, "messages_stream", reply)
 	_ = stream.finish(reply)
 }
 

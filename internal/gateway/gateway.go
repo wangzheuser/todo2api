@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"todo2api/internal/config"
+	"todo2api/internal/observability"
 	"todo2api/internal/openai"
 	"todo2api/internal/pool"
 	"todo2api/internal/session"
@@ -178,6 +179,9 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 	req = openai.NormalizeInstructions(req)
 	runnerModel := g.resolveModel(req.Model)
 	publicModel := g.publicModelID(req.Model, runnerModel)
+	requestID := observability.RequestID(ctx)
+	log.Printf("gateway start id=%s model=%s runner_model=%s stream=%t messages=%d tools=%d resume=%t",
+		requestID, publicModel, runnerModel, emit != nil, len(req.Messages), len(req.Tools), strings.TrimSpace(req.Metadata[openai.TodoIDMetadataKey]) != "")
 	var completedUsage TokenUsage
 	succeeded := false
 	defer func() {
@@ -280,7 +284,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 		}
 		result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, previousAssistantSignature, emitText, req.Tools)
 		if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
-			log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+			log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 			err = ErrUpstreamModelMismatch
 		}
 		if err != nil {
@@ -308,7 +312,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			}
 			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
-				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+				log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 				err = ErrUpstreamModelMismatch
 			}
 			if err != nil {
@@ -323,7 +327,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				}
 				return nil, fmt.Errorf("%w after rebasing todo %s", ErrEmptyCompletion, oldTodoID)
 			}
-			log.Printf("rebased empty upstream todo %s to todo %s on account %d", oldTodoID, todoID, g.pool.IndexOf(acc)+1)
+			log.Printf("rebased empty upstream todo id=%s old_todo=%s new_todo=%s account=%d", requestID, oldTodoID, todoID, g.pool.IndexOf(acc)+1)
 		}
 		if err := startStream(); err != nil {
 			return nil, err
@@ -372,7 +376,7 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			}
 			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
-				log.Printf("upstream model mismatch account %d todo %s requested=%s actual=%s", g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
+				log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
 				err = ErrUpstreamModelMismatch
 			}
 			empty := err == nil && emptyAssistantResult(result)
@@ -411,8 +415,8 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 				classification = "request_rejected"
 			}
 			log.Printf(
-				"upstream run attempt %d/%d account %d todo %s model %s classification=%s retryable=%t: %v",
-				runAttempts, maxRunAttempts, g.pool.IndexOf(acc)+1, todoID, runnerModel,
+				"upstream run attempt id=%s attempt=%d/%d account=%d todo=%s model=%s classification=%s retryable=%t error=%v",
+				requestID, runAttempts, maxRunAttempts, g.pool.IndexOf(acc)+1, todoID, runnerModel,
 				classification, action != accountFailureNone, failure,
 			)
 			if action == accountFailureNone {
@@ -686,6 +690,12 @@ func isTransientUpstreamDetail(detail string) bool {
 		"received from peer",
 		"websocket: close 1012",
 		"server restarting",
+		"context deadline exceeded",
+		"client.timeout exceeded",
+		"connection reset",
+		"connection refused",
+		"i/o timeout",
+		"eof",
 	} {
 		if strings.Contains(detail, marker) {
 			return true

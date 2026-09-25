@@ -873,7 +873,18 @@ func TestAccountFailurePolicy(t *testing.T) {
 			name: "deterministic rejection",
 			err:  fmt.Errorf("blocked: %w", ErrUpstreamRequestRejected),
 		},
-		{name: "network error", err: errors.New("connection reset")},
+		{
+			name:   "network error",
+			err:    errors.New("connection reset"),
+			action: accountFailureCooldown,
+			min:    20 * time.Second,
+		},
+		{
+			name:   "client timeout",
+			err:    errors.New("Post https://api.example.test: context deadline exceeded (Client.Timeout exceeded while awaiting headers)"),
+			action: accountFailureCooldown,
+			min:    20 * time.Second,
+		},
 	}
 
 	for _, test := range tests {

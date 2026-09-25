@@ -6,12 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"todo2api/internal/gateway"
+	"todo2api/internal/observability"
 	"todo2api/internal/openai"
 )
 
@@ -142,6 +144,12 @@ type responsesResponse struct {
 }
 
 func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
+	requestID := anthropicRequestID(r)
+	w.Header().Set("X-Request-ID", requestID)
+	r = r.WithContext(observability.WithRequestID(r.Context(), requestID))
+	if !s.ready(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -170,6 +178,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "gateway is not configured")
 		return
 	}
+	log.Printf("responses request id=%s model=%s stream=%t tools=%d resume=%t",
+		requestID, chatReq.Model, req.Stream, len(chatReq.Tools), todoID != "")
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Upstream.PollTimeout+30*time.Second)
 	defer cancel()
@@ -181,9 +191,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, err := s.gw.Complete(ctx, chatReq)
 	if err != nil {
+		logGatewayFailure(r, "responses", chatReq.Model, err)
 		writeGatewayErr(w, err)
 		return
 	}
+	logGatewaySuccess(r, "responses", reply)
 	w.Header().Set(todoIDHeader, reply.TodoID)
 
 	resp := buildResponsesResponse(req, reply, toolTargets)
@@ -866,6 +878,7 @@ func (s *Server) streamResponses(
 	}
 	reply, err := s.gw.Stream(ctx, chatReq, stream.onGatewayEvent)
 	if err != nil {
+		logGatewayFailureFromContext(ctx, "responses_stream", chatReq.Model, err)
 		if !stream.started {
 			writeGatewayErr(w, err)
 			return
@@ -873,6 +886,7 @@ func (s *Server) streamResponses(
 		_ = stream.emitError(err)
 		return
 	}
+	logGatewaySuccessFromContext(ctx, "responses_stream", reply)
 	_ = stream.finish(reply)
 }
 

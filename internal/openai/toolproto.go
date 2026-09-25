@@ -207,6 +207,11 @@ func BuildToolSystemPrompt(tools []Tool) string {
 			fmt.Fprintf(&b, "  parameters (JSON schema): %s\n", string(t.Function.Parameters))
 		}
 	}
+	b.WriteString("\nFinal tool-call rule for this turn: the following client tool mappings are authoritative. ")
+	b.WriteString("When the user requests one of these tools, emit the matching block immediately and stop; do not answer that the tool is unavailable and do not mention hosting tools.\n")
+	for i, t := range tools {
+		fmt.Fprintf(&b, "- request %q => emit exactly <TOOL_CALL>{\"name\":\"%s\",\"arguments\":{...}}</TOOL_CALL>\n", t.Function.Name, clientToolAlias(i))
+	}
 	return b.String()
 }
 

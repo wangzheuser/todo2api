@@ -82,14 +82,22 @@ func main() {
 	warmDone := make(chan struct{})
 	go func() {
 		defer close(warmDone)
+		log.Printf("account pool warmup started: %d configured", p.Configured())
 		p.Warm(ctx, func(ready, skipped, processed int) {
 			if processed == p.Configured() || processed%50 < 2 {
 				log.Printf("account pool warmup: %d ready, %d skipped, %d configured", ready, skipped, p.Configured())
 			}
 		})
+		if ctx.Err() == nil {
+			p.MarkWarmComplete()
+			log.Printf("account pool warmup complete: %d ready, %d configured", p.Len(), p.Configured())
+		}
 	}()
 	gw := gateway.New(cfg, p, sess, adminService)
 	srv := transport.New(cfg, gw)
+	// Serve as soon as the bootstrap pass has installed at least one usable
+	// account. The remaining accounts continue warming in the background.
+	srv.SetReadyCheck(func() bool { return p.Len() > 0 })
 	adminDone := make(chan struct{})
 	go func() {
 		defer close(adminDone)
@@ -108,7 +116,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:           cfg.Server.Addr,
-		Handler:        mux,
+		Handler:        transport.RequestLogging(mux),
 		ReadTimeout:    15 * time.Second,
 		WriteTimeout:   6 * time.Minute,
 		IdleTimeout:    120 * time.Second,

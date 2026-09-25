@@ -182,6 +182,7 @@ type Pool struct {
 	warmStart            int
 	proxies              *proxypool.Pool
 	modelCatalogComplete atomic.Bool
+	warmComplete         atomic.Bool
 }
 
 func (p *Pool) SetRepository(repo AccountRepository) {
@@ -423,6 +424,14 @@ func (p *Pool) Models() []upstream.ModelInfo {
 func (p *Pool) ModelCatalogComplete() bool {
 	return p.modelCatalogComplete.Load()
 }
+
+// MarkWarmComplete records that the background account initialization pass has
+// finished. It is separate from Len so health checks can distinguish a small
+// bootstrap pool from the fully warmed serving pool.
+func (p *Pool) MarkWarmComplete() { p.warmComplete.Store(true) }
+
+// WarmComplete reports whether the initial background account warmup finished.
+func (p *Pool) WarmComplete() bool { return p.warmComplete.Load() }
 
 // Model finds model metadata by public alias, full upstream ID, or runner ID.
 func (p *Pool) Model(id string) (upstream.ModelInfo, bool) {
