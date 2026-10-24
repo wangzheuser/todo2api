@@ -53,6 +53,11 @@ var ErrUpstreamRequestRejected = errors.New("upstream request rejected")
 // other than the provider-qualified model requested in AgentSettings.
 var ErrUpstreamModelMismatch = errors.New("upstream executed a different model than requested")
 
+// ErrModelDowngraded means the requested model is known to be silently
+// executed by upstream as a different model. Requests are refused before any
+// upstream call so clients get a clear error instead of a wasted run.
+var ErrModelDowngraded = errors.New("upstream silently downgrades this model")
+
 // ErrEmptyCompletion means the upstream reported a completed run without any
 // visible assistant text, regardless of whether it also reported billable
 // usage. Treating that state as success makes clients observe an empty answer.
@@ -90,16 +95,26 @@ type TokenUsage struct {
 }
 
 // Models returns short discovered IDs plus configured public aliases.
-// Configured aliases take precedence when IDs overlap.
+// Configured aliases take precedence when IDs overlap. Models that upstream
+// is known to silently downgrade are omitted: listing them would only make
+// clients pick a model that cannot actually be served.
 func (g *Gateway) Models() []openai.Model {
 	models := make(map[string]openai.Model)
 	if g.pool != nil {
 		for _, model := range g.pool.Models() {
+			if _, downgraded := g.pool.DowngradedModel(model.ID); downgraded {
+				continue
+			}
 			models[model.ID] = openAIModel(model.ID, model)
 		}
 	}
 
 	for alias, target := range g.cfg.Models.Aliases {
+		if g.pool != nil {
+			if _, downgraded := g.pool.DowngradedModel(target); downgraded {
+				continue
+			}
+		}
 		model := openai.Model{ID: alias, Object: "model", OwnedBy: "todofor.ai"}
 		if g.pool != nil {
 			if info, ok := g.pool.Model(target); ok {
@@ -178,6 +193,11 @@ func (g *Gateway) Stream(ctx context.Context, req openai.ChatRequest, emit func(
 func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit func(StreamEvent) error) (*Reply, error) {
 	req = openai.NormalizeInstructions(req)
 	runnerModel := g.resolveModel(req.Model)
+	if g.pool != nil {
+		if actual, downgraded := g.pool.DowngradedModel(runnerModel); downgraded {
+			return nil, fmt.Errorf("%w: upstream executes %s instead of the requested %s", ErrModelDowngraded, actual, runnerModel)
+		}
+	}
 	publicModel := g.publicModelID(req.Model, runnerModel)
 	requestID := observability.RequestID(ctx)
 	log.Printf("gateway start id=%s model=%s runner_model=%s stream=%t messages=%d tools=%d resume=%t",
@@ -285,7 +305,8 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 		result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, previousAssistantSignature, emitText, req.Tools)
 		if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 			log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
-			err = ErrUpstreamModelMismatch
+			g.recordModelMismatch(runnerModel, result.ActualModel)
+			err = fmt.Errorf("%w (requested %s, upstream executed %s)", ErrUpstreamModelMismatch, runnerModel, result.ActualModel)
 		}
 		if err != nil {
 			if handleErr := g.handleAccountFailure(acc, err); handleErr != nil {
@@ -313,7 +334,8 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 				log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
-				err = ErrUpstreamModelMismatch
+				g.recordModelMismatch(runnerModel, result.ActualModel)
+				err = fmt.Errorf("%w (requested %s, upstream executed %s)", ErrUpstreamModelMismatch, runnerModel, result.ActualModel)
 			}
 			if err != nil {
 				if handleErr := g.handleAccountFailure(acc, err); handleErr != nil {
@@ -377,7 +399,8 @@ func (g *Gateway) complete(ctx context.Context, req openai.ChatRequest, emit fun
 			result, err = g.waitAssistant(runCtx, sub, runtime.Client, todoID, "", emitText, req.Tools)
 			if err == nil && upstreamModelMismatch(runnerModel, result.ActualModel) {
 				log.Printf("upstream model mismatch id=%s account=%d todo=%s requested=%s actual=%s", requestID, g.pool.IndexOf(acc)+1, todoID, runnerModel, result.ActualModel)
-				err = ErrUpstreamModelMismatch
+				g.recordModelMismatch(runnerModel, result.ActualModel)
+				err = fmt.Errorf("%w (requested %s, upstream executed %s)", ErrUpstreamModelMismatch, runnerModel, result.ActualModel)
 			}
 			empty := err == nil && emptyAssistantResult(result)
 			if err == nil && !empty {
@@ -494,10 +517,22 @@ func (g *Gateway) startNewConversationExcept(
 		attempts = maxNewConversationAttempts
 	}
 	var lastErr error
-
+	// Every pooled account may sit in a brief cooldown right after a burst of
+	// dial blips. Waiting out the cooldown inside the request is cheaper than
+	// surfacing a 503 to clients that would immediately retry anyway.
+	waited := time.Duration(0)
 	for attempt := 0; attempt < attempts; attempt++ {
 		acc := g.pool.PickExcept(excluded)
 		if acc == nil {
+			if waited < accountsUnavailableMaxWait {
+				select {
+				case <-ctx.Done():
+				case <-time.After(accountsUnavailableRetryInterval):
+				}
+				waited += accountsUnavailableRetryInterval
+				attempt--
+				continue
+			}
 			break
 		}
 		acc.Acquire()
@@ -573,6 +608,14 @@ func (g *Gateway) handleAccountFailure(acc *pool.Account, cause error) error {
 	return g.applyAccountFailure(acc, action, cooldown, cause)
 }
 
+// recordModelMismatch feeds an upstream model swap into the pool's downgrade
+// tracker so repeated mismatches take the model out of rotation.
+func (g *Gateway) recordModelMismatch(requested, actual string) {
+	if g.pool.RecordModelMismatch(requested, actual) {
+		log.Printf("upstream model %s marked as downgraded: upstream executes %s", requested, actual)
+	}
+}
+
 func (g *Gateway) applyAccountFailure(
 	acc *pool.Account,
 	action accountFailureAction,
@@ -625,6 +668,11 @@ const (
 const (
 	maxNewConversationAttempts = 8
 	maxRunAttempts             = 2
+
+	// accountsUnavailableRetryInterval paces re-picking while every account is
+	// briefly cooling down; accountsUnavailableMaxWait bounds the total wait.
+	accountsUnavailableRetryInterval = time.Second
+	accountsUnavailableMaxWait       = 5 * time.Second
 )
 
 func accountFailurePolicy(err error) (accountFailureAction, time.Duration) {
@@ -638,7 +686,10 @@ func accountFailurePolicy(err error) (accountFailureAction, time.Duration) {
 		return accountFailureCooldown, 2 * time.Minute
 	}
 	if errors.Is(err, ErrUpstreamModelMismatch) {
-		return accountFailureCooldown, 10 * time.Minute
+		// A model swap is per-model upstream behavior, not a broken account:
+		// cooling the account down only cascades 503s onto the models that
+		// still work. The model itself is recorded as downgraded instead.
+		return accountFailureNone, 0
 	}
 	if errors.Is(err, ErrEmptyCompletion) {
 		// A completed run with no body is usually a transient upstream/account
@@ -672,6 +723,11 @@ func accountFailurePolicy(err error) (accountFailureAction, time.Duration) {
 		return accountFailureNone, 0
 	}
 
+	if detail := strings.ToLower(err.Error()); isDialFailure(detail) {
+		// Brief cooldown keeps concurrent requests from hammering a dial path
+		// that is momentarily failing, without draining the account pool.
+		return accountFailureCooldown, 3 * time.Second
+	}
 	if isTransientUpstreamDetail(strings.ToLower(err.Error())) {
 		return accountFailureCooldown, 30 * time.Second
 	}
@@ -696,6 +752,24 @@ func isTransientUpstreamDetail(detail string) bool {
 		"connection refused",
 		"i/o timeout",
 		"eof",
+	} {
+		if strings.Contains(detail, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDialFailure reports whether the error is a TCP/WebSocket dial failure.
+// These are bursty network blips rather than broken accounts: a long cooldown
+// would drain the pool under concurrent load, so they get a brief one.
+func isDialFailure(detail string) bool {
+	for _, marker := range []string{
+		"connectex",
+		"dial tcp",
+		"dial unix",
+		"no such host",
+		"network is unreachable",
 	} {
 		if strings.Contains(detail, marker) {
 			return true

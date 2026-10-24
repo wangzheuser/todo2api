@@ -204,6 +204,17 @@ func (s *Service) Models() Response {
 		}
 	}
 
+	// Upstream silently executes a different model for downgraded models, so
+	// the catalog must not keep advertising them as available even though
+	// they are still listed in every account's upstream directory.
+	for id, model := range models {
+		if _, downgraded := s.pool.DowngradedModel(model.CanonicalID); downgraded {
+			model.Available = false
+			model.AvailabilityReason = "model_downgraded"
+			models[id] = model
+		}
+	}
+
 	response := Response{
 		Models:               make([]Model, 0, len(models)),
 		AvailabilityComplete: complete,

@@ -96,7 +96,8 @@ export interface CatalogModel {
   availability_reason?:
     | "no_active_accounts"
     | "catalog_incomplete"
-    | "not_common_to_pool";
+    | "not_common_to_pool"
+    | "model_downgraded";
   pricing?: ModelPricing;
 }
 

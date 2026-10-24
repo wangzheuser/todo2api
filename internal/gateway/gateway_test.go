@@ -806,6 +806,7 @@ func TestAccountFailurePolicy(t *testing.T) {
 		err    error
 		action accountFailureAction
 		min    time.Duration
+		max    time.Duration
 	}{
 		{
 			name: "balance in 500 body",
@@ -850,6 +851,11 @@ func TestAccountFailurePolicy(t *testing.T) {
 			action: accountFailureCooldown, min: 20 * time.Second,
 		},
 		{
+			name:   "ws dial burst failure",
+			err:    errors.New("frontend ws dial wss://api.todofor.ai/ws/v1/frontend?tabId=x: dial tcp 127.177.0.85:443: connectex: A connection attempt failed because the party did not properly respond"),
+			action: accountFailureCooldown, min: time.Second, max: 10 * time.Second,
+		},
+		{
 			name:   "empty completion",
 			err:    fmt.Errorf("fallback exhausted: %w", ErrEmptyCompletion),
 			action: accountFailureCooldown, min: 20 * time.Second,
@@ -857,7 +863,7 @@ func TestAccountFailurePolicy(t *testing.T) {
 		{
 			name:   "model mismatch",
 			err:    fmt.Errorf("wrong model: %w", ErrUpstreamModelMismatch),
-			action: accountFailureCooldown, min: 5 * time.Minute,
+			action: accountFailureNone,
 		},
 		{
 			name:   "first response timeout",
@@ -890,7 +896,7 @@ func TestAccountFailurePolicy(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			action, duration := accountFailurePolicy(test.err)
-			if action != test.action || duration < test.min {
+			if action != test.action || duration < test.min || (test.max != 0 && duration > test.max) {
 				t.Fatalf("action = %d, cooldown = %s", action, duration)
 			}
 		})

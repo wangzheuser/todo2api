@@ -552,6 +552,9 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 }
 
 func gatewayErrorStatus(w http.ResponseWriter, err error) int {
+	if errors.Is(err, gateway.ErrModelDowngraded) || errors.Is(err, gateway.ErrUpstreamModelMismatch) {
+		return http.StatusUnprocessableEntity
+	}
 	if errors.Is(err, gateway.ErrUpstreamRequestRejected) {
 		return http.StatusUnprocessableEntity
 	}

@@ -183,6 +183,23 @@ type Pool struct {
 	proxies              *proxypool.Pool
 	modelCatalogComplete atomic.Bool
 	warmComplete         atomic.Bool
+	downgradeMu          sync.RWMutex
+	modelDowngrades      map[string]modelDowngradeStat
+}
+
+// Downgraded models are tracked per canonical model ID. Upstream silently
+// executes a different model than the one requested; once the swap repeats
+// within the hold period the requested model is treated as not actually
+// served, regardless of what the upstream catalog advertises.
+const (
+	modelMismatchThreshold   = 2
+	modelDowngradeHoldPeriod = 30 * time.Minute
+)
+
+type modelDowngradeStat struct {
+	Actual   string
+	Count    int
+	LastSeen time.Time
 }
 
 func (p *Pool) SetRepository(repo AccountRepository) {
@@ -466,6 +483,50 @@ func (p *Pool) PublicModelID(id string) (string, bool) {
 	}
 	publicID, ok := p.publicIDByID[model.ID]
 	return publicID, ok
+}
+
+// RecordModelMismatch reports that upstream executed actual instead of the
+// requested model. Repeated swaps within the hold period mark the requested
+// model as downgraded; the returned bool reports that transition.
+func (p *Pool) RecordModelMismatch(requested, actual string) bool {
+	key := p.downgradeKey(requested)
+	p.downgradeMu.Lock()
+	defer p.downgradeMu.Unlock()
+	stat := p.modelDowngrades[key]
+	if time.Since(stat.LastSeen) > modelDowngradeHoldPeriod {
+		stat.Count = 0
+	}
+	stat.Actual = actual
+	stat.Count++
+	stat.LastSeen = time.Now()
+	if p.modelDowngrades == nil {
+		p.modelDowngrades = make(map[string]modelDowngradeStat)
+	}
+	p.modelDowngrades[key] = stat
+	return stat.Count == modelMismatchThreshold
+}
+
+// DowngradedModel reports whether the given model — public alias, canonical
+// ID, or runner selector — has been repeatedly downgraded by upstream, and
+// returns the model upstream actually executes.
+func (p *Pool) DowngradedModel(id string) (string, bool) {
+	key := p.downgradeKey(id)
+	p.downgradeMu.RLock()
+	defer p.downgradeMu.RUnlock()
+	stat, ok := p.modelDowngrades[key]
+	if !ok || stat.Count < modelMismatchThreshold || time.Since(stat.LastSeen) > modelDowngradeHoldPeriod {
+		return "", false
+	}
+	return stat.Actual, true
+}
+
+// downgradeKey normalizes any model reference to the canonical catalog ID so
+// that public aliases, upstream IDs, and runner selectors share one record.
+func (p *Pool) downgradeKey(id string) string {
+	if model, ok := p.Model(id); ok {
+		return model.ID
+	}
+	return id
 }
 
 // RefreshModels reloads the upstream catalog from a bounded set of ready accounts.

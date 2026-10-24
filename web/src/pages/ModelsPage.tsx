@@ -32,6 +32,7 @@ const availabilityReasons: Record<string, string> = {
   no_active_accounts: "暂无可用账号",
   catalog_incomplete: "目录获取不完整",
   not_common_to_pool: "非账号池共同模型",
+  model_downgraded: "上游实际执行其他模型",
 };
 
 /** formatPrice renders one USD-per-million-token value. */

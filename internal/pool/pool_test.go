@@ -254,6 +254,44 @@ func TestCommonModelsAndResolution(t *testing.T) {
 	}
 }
 
+// TestModelDowngradeTracking covers the runner-selector record, alias/canonical
+// lookups, the threshold transition, and recovery after the hold period.
+func TestModelDowngradeTracking(t *testing.T) {
+	p := &Pool{}
+	p.setModels([]upstream.ModelInfo{{ID: "anthropic/claude-fable-5.1"}})
+
+	if _, downgraded := p.DowngradedModel("anthropic:anthropic/claude-fable-5.1"); downgraded {
+		t.Fatal("fresh model must not be downgraded")
+	}
+	if p.RecordModelMismatch("anthropic:anthropic/claude-fable-5.1", "anthropic:anthropic/claude-sonnet-5.5") {
+		t.Fatal("first mismatch must not mark the model downgraded")
+	}
+	if _, downgraded := p.DowngradedModel("claude-fable-5.1"); downgraded {
+		t.Fatal("one mismatch must not mark the model downgraded")
+	}
+	if !p.RecordModelMismatch("claude-fable-5.1", "anthropic:anthropic/claude-sonnet-5.5") {
+		t.Fatal("second mismatch must mark the model downgraded")
+	}
+	actual, downgraded := p.DowngradedModel("anthropic/claude-fable-5.1")
+	if !downgraded || actual != "anthropic:anthropic/claude-sonnet-5.5" {
+		t.Fatalf("downgraded lookup = %q, %v", actual, downgraded)
+	}
+
+	p.downgradeMu.Lock()
+	p.modelDowngrades["anthropic/claude-fable-5.1"] = modelDowngradeStat{
+		Actual: "anthropic:anthropic/claude-sonnet-5.5",
+		Count:  modelMismatchThreshold,
+		// LastSeen zero = far outside the hold period.
+	}
+	p.downgradeMu.Unlock()
+	if _, downgraded := p.DowngradedModel("claude-fable-5.1"); downgraded {
+		t.Fatal("stale downgrade record must not mark the model downgraded")
+	}
+	if p.RecordModelMismatch("claude-fable-5.1", "anthropic:anthropic/claude-sonnet-5.5") {
+		t.Fatal("mismatch after the hold period must restart the count")
+	}
+}
+
 func TestPublicModelIDsDisambiguateProviderCollisions(t *testing.T) {
 	p := &Pool{}
 	p.setModels([]upstream.ModelInfo{
