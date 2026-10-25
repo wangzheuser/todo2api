@@ -71,17 +71,18 @@ func TestServiceMergesStaticLiveAndAliasModels(t *testing.T) {
 			Default:           "anthropic:anthropic/claude-fable-5",
 			Aliases:           map[string]string{"ox-alpha": "anthropic:anthropic/claude-fable-5"},
 			FreeAccountModels: []string{"claude-fable-5"},
+			NativeToolModels:  []string{"claude-fable-5"},
 		},
 	}
 	p, err := pool.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(p, cfg.Models.Aliases, cfg.Models.FreeAccountModels)
+	service := NewService(p, cfg.Models.Aliases, cfg.Models.FreeAccountModels, cfg.Models.NativeToolModels)
 	// Constructor copies configuration so later mutations cannot alter service behavior.
 	cfg.Models.FreeAccountModels[0] = "ox-alpha"
 	response := service.Models()
-	if response.Total != 54 || response.Available != 3 || !response.AvailabilityComplete {
+	if response.Total != 54 || response.Available != 1 || !response.AvailabilityComplete {
 		t.Fatalf("response totals = %#v", response)
 	}
 	byID := make(map[string]Model, len(response.Models))
@@ -91,10 +92,12 @@ func TestServiceMergesStaticLiveAndAliasModels(t *testing.T) {
 	if !byID["claude-fable-5"].Available || byID["claude-fable-5"].Name != "Live Fable" {
 		t.Fatalf("static live overlay = %#v", byID["claude-fable-5"])
 	}
-	if !byID["provider-model"].Available || byID["provider-model"].CanonicalID != "new/provider-model" {
+	// Pool-listed models outside the free-account whitelist are not callable,
+	// so live-only and alias entries collapse to unavailable.
+	if byID["provider-model"].Available || byID["provider-model"].AvailabilityReason != "not_callable_by_current_accounts" || byID["provider-model"].CanonicalID != "new/provider-model" {
 		t.Fatalf("live-only model = %#v", byID["provider-model"])
 	}
-	if !byID["ox-alpha"].Available || byID["ox-alpha"].CanonicalID != "anthropic/claude-fable-5" {
+	if byID["ox-alpha"].Available || byID["ox-alpha"].AvailabilityReason != "not_callable_by_current_accounts" || byID["ox-alpha"].CanonicalID != "anthropic/claude-fable-5" {
 		t.Fatalf("alias model = %#v", byID["ox-alpha"])
 	}
 	if !byID["claude-fable-5"].FreeAccountCallable {
@@ -102,5 +105,14 @@ func TestServiceMergesStaticLiveAndAliasModels(t *testing.T) {
 	}
 	if byID["ox-alpha"].FreeAccountCallable || byID["provider-model"].FreeAccountCallable {
 		t.Fatalf("alias or live-only model inherited free status: %#v", byID)
+	}
+	if !byID["claude-fable-5"].NativeToolCalls {
+		t.Fatalf("tool-capable model not marked: %#v", byID["claude-fable-5"])
+	}
+	if byID["ox-alpha"].NativeToolCalls || byID["provider-model"].NativeToolCalls {
+		t.Fatalf("non tool-capable model inherited native tool status: %#v", byID)
+	}
+	if response.Models[0].ID != "claude-fable-5" {
+		t.Fatalf("available model is not sorted first: %#v", response.Models[0])
 	}
 }

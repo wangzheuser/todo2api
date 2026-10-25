@@ -33,6 +33,7 @@ const availabilityReasons: Record<string, string> = {
   catalog_incomplete: "目录获取不完整",
   not_common_to_pool: "非账号池共同模型",
   model_downgraded: "上游实际执行其他模型",
+  not_callable_by_current_accounts: "当前账号套餐不可调用",
 };
 
 /** formatPrice renders one USD-per-million-token value. */
@@ -50,12 +51,15 @@ function combinedPrice(model: CatalogModel): number {
   return model.pricing?.current.combined ?? Number.POSITIVE_INFINITY;
 }
 
-/** compareModels applies the selected stable ordering. */
+/** compareModels applies the selected stable ordering with available models always first. */
 function compareModels(
   left: CatalogModel,
   right: CatalogModel,
   mode: SortMode,
 ): number {
+  if (left.available !== right.available) {
+    return left.available ? -1 : 1;
+  }
   if (mode === "name") return left.id.localeCompare(right.id);
   if (mode === "context") {
     return (
@@ -268,13 +272,14 @@ export function ModelsPage() {
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1620px]">
+          <Table className="min-w-[1720px]">
             <TableHeader>
               <TableRow>
                 <TableHead>模型</TableHead>
                 <TableHead>计费渠道</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>免费账号</TableHead>
+                <TableHead>原生工具调用</TableHead>
                 <TableHead className="text-right">上下文</TableHead>
                 <TableHead className="text-right">最大输出</TableHead>
                 <TableHead className="text-right">输入原价</TableHead>
@@ -325,6 +330,15 @@ export function ModelsPage() {
                       <Badge variant="secondary">免费账号不可调用</Badge>
                     )}
                   </TableCell>
+                  <TableCell>
+                    {model.native_tool_calls ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/15">
+                        支持
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">不支持</Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right font-mono">
                     {formatTokenCount(model.context_length)}
                   </TableCell>
@@ -367,7 +381,7 @@ export function ModelsPage() {
               {models.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={12}
+                    colSpan={13}
                     className="h-24 text-center text-muted-foreground"
                   >
                     没有符合条件的模型

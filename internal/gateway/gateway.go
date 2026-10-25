@@ -96,13 +96,18 @@ type TokenUsage struct {
 
 // Models returns short discovered IDs plus configured public aliases.
 // Configured aliases take precedence when IDs overlap. Models that upstream
-// is known to silently downgrade are omitted: listing them would only make
-// clients pick a model that cannot actually be served.
+// is known to silently downgrade are omitted, and when free_account_models is
+// configured it acts as the operator's verified callable list: anything else
+// would only make clients pick a model that cannot actually be served.
 func (g *Gateway) Models() []openai.Model {
 	models := make(map[string]openai.Model)
+	verifiedOnly := len(g.cfg.Models.FreeAccountModels) > 0
 	if g.pool != nil {
 		for _, model := range g.pool.Models() {
 			if _, downgraded := g.pool.DowngradedModel(model.ID); downgraded {
+				continue
+			}
+			if verifiedOnly && !g.cfg.Models.IsFreeAccountCallable(model.ID) {
 				continue
 			}
 			models[model.ID] = openAIModel(model.ID, model)
@@ -110,6 +115,9 @@ func (g *Gateway) Models() []openai.Model {
 	}
 
 	for alias, target := range g.cfg.Models.Aliases {
+		if verifiedOnly && !g.cfg.Models.IsFreeAccountCallable(alias) && !g.cfg.Models.IsFreeAccountCallable(target) {
+			continue
+		}
 		if g.pool != nil {
 			if _, downgraded := g.pool.DowngradedModel(target); downgraded {
 				continue
@@ -132,8 +140,15 @@ func (g *Gateway) Models() []openai.Model {
 		if publicID == "" {
 			publicID = configuredModelShortID(defaultModel)
 		}
-		if _, exists := models[publicID]; !exists {
-			models[publicID] = openai.Model{ID: publicID, Object: "model", OwnedBy: "todofor.ai"}
+		if verifiedOnly && !g.cfg.Models.IsFreeAccountCallable(defaultModel) && !g.cfg.Models.IsFreeAccountCallable(publicID) {
+			// The default model is not on the verified callable list; serving
+			// it would fail the same gate at request time.
+			publicID = ""
+		}
+		if publicID != "" {
+			if _, exists := models[publicID]; !exists {
+				models[publicID] = openai.Model{ID: publicID, Object: "model", OwnedBy: "todofor.ai"}
+			}
 		}
 	}
 

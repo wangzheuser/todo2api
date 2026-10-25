@@ -79,6 +79,7 @@ type ModelsConfig struct {
 	Default           string            `yaml:"default"`
 	Aliases           map[string]string `yaml:"aliases"`
 	FreeAccountModels []string          `yaml:"free_account_models"`
+	NativeToolModels  []string          `yaml:"native_tool_models"`
 }
 
 // Resolve maps a public model identifier to its configured upstream selector.
@@ -95,6 +96,17 @@ func (m ModelsConfig) Resolve(model string) string {
 // IsFreeAccountCallable reports whether a public model ID is explicitly verified for free accounts.
 func (m ModelsConfig) IsFreeAccountCallable(model string) bool {
 	for _, candidate := range m.FreeAccountModels {
+		if candidate == model {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNativeToolCapable reports whether a public model ID is verified to support
+// native (custom function) tool calls on the current upstream accounts.
+func (m ModelsConfig) IsNativeToolCapable(model string) bool {
+	for _, candidate := range m.NativeToolModels {
 		if candidate == model {
 			return true
 		}
@@ -239,6 +251,9 @@ func (c *Config) setDefaults() {
 	if c.Models.FreeAccountModels == nil {
 		c.Models.FreeAccountModels = []string{}
 	}
+	if c.Models.NativeToolModels == nil {
+		c.Models.NativeToolModels = []string{}
+	}
 	if c.ToolProtocol.DenyUpstreamTools == nil {
 		c.ToolProtocol.DenyUpstreamTools = []string{"device:*", "cloud:*"}
 	}
@@ -316,6 +331,18 @@ func (c *Config) Validate() error {
 		}
 		freeAccountModels[model] = struct{}{}
 		c.Models.FreeAccountModels[i] = model
+	}
+	nativeToolModels := make(map[string]struct{}, len(c.Models.NativeToolModels))
+	for i, model := range c.Models.NativeToolModels {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return fmt.Errorf("models.native_tool_models[%d] must not be empty", i)
+		}
+		if _, exists := nativeToolModels[model]; exists {
+			return fmt.Errorf("models.native_tool_models[%d] duplicates %q", i, model)
+		}
+		nativeToolModels[model] = struct{}{}
+		c.Models.NativeToolModels[i] = model
 	}
 	return nil
 }

@@ -88,6 +88,7 @@ type Model struct {
 	Available           bool     `json:"available"`
 	AvailabilityReason  string   `json:"availability_reason,omitempty"`
 	FreeAccountCallable bool     `json:"free_account_callable"`
+	NativeToolCalls     bool     `json:"native_tool_calls"`
 	Pricing             *Pricing `json:"pricing,omitempty"`
 }
 
@@ -106,6 +107,7 @@ type Service struct {
 	pool              *pool.Pool
 	aliases           map[string]string
 	freeAccountModels map[string]struct{}
+	nativeToolModels  map[string]struct{}
 }
 
 // Default returns the validated embedded catalog.
@@ -143,7 +145,7 @@ func Load(data []byte) (*Catalog, error) {
 }
 
 // NewService creates a model-list service backed by the current pool.
-func NewService(p *pool.Pool, aliases map[string]string, freeAccountModels []string) *Service {
+func NewService(p *pool.Pool, aliases map[string]string, freeAccountModels []string, nativeToolModels []string) *Service {
 	copyAliases := make(map[string]string, len(aliases))
 	for alias, target := range aliases {
 		copyAliases[alias] = target
@@ -152,9 +154,14 @@ func NewService(p *pool.Pool, aliases map[string]string, freeAccountModels []str
 	for _, model := range freeAccountModels {
 		copyFreeAccountModels[model] = struct{}{}
 	}
+	copyNativeToolModels := make(map[string]struct{}, len(nativeToolModels))
+	for _, model := range nativeToolModels {
+		copyNativeToolModels[model] = struct{}{}
+	}
 	return &Service{
 		catalog: Default(), pool: p, aliases: copyAliases,
 		freeAccountModels: copyFreeAccountModels,
+		nativeToolModels:  copyNativeToolModels,
 	}
 }
 
@@ -207,11 +214,23 @@ func (s *Service) Models() Response {
 	// Upstream silently executes a different model for downgraded models, so
 	// the catalog must not keep advertising them as available even though
 	// they are still listed in every account's upstream directory.
+	//
+	// When free_account_models is configured, it is the operator's verified
+	// list of models the current accounts can actually execute; everything
+	// else stays listed but is not counted as available.
 	for id, model := range models {
 		if _, downgraded := s.pool.DowngradedModel(model.CanonicalID); downgraded {
 			model.Available = false
 			model.AvailabilityReason = "model_downgraded"
 			models[id] = model
+			continue
+		}
+		if model.Available && len(s.freeAccountModels) > 0 {
+			if _, callable := s.freeAccountModels[model.ID]; !callable {
+				model.Available = false
+				model.AvailabilityReason = "not_callable_by_current_accounts"
+				models[id] = model
+			}
 		}
 	}
 
@@ -222,12 +241,20 @@ func (s *Service) Models() Response {
 	}
 	for _, model := range models {
 		_, model.FreeAccountCallable = s.freeAccountModels[model.ID]
+		_, model.NativeToolCalls = s.nativeToolModels[model.ID]
 		response.Models = append(response.Models, model)
 		if model.Available {
 			response.Available++
 		}
 	}
-	sort.Slice(response.Models, func(i, j int) bool { return response.Models[i].ID < response.Models[j].ID })
+	// Available models surface first so operators see callable rows immediately;
+	// everything else keeps the stable ID order.
+	sort.Slice(response.Models, func(i, j int) bool {
+		if response.Models[i].Available != response.Models[j].Available {
+			return response.Models[i].Available
+		}
+		return response.Models[i].ID < response.Models[j].ID
+	})
 	response.Total = len(response.Models)
 	return response
 }

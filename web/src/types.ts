@@ -93,11 +93,13 @@ export interface CatalogModel {
   max_completion_tokens?: number;
   available: boolean;
   free_account_callable: boolean;
+  native_tool_calls: boolean;
   availability_reason?:
     | "no_active_accounts"
     | "catalog_incomplete"
     | "not_common_to_pool"
-    | "model_downgraded";
+    | "model_downgraded"
+    | "not_callable_by_current_accounts";
   pricing?: ModelPricing;
 }
 

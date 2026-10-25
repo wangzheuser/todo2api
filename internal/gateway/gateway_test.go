@@ -1324,17 +1324,16 @@ func TestGatewayDiscoveredModelsAndAliases(t *testing.T) {
 	if _, ok := byID["public-model"]; !ok {
 		t.Fatalf("configured alias missing from %#v", models)
 	}
-	if _, ok := byID["gpt-5.6-sol"]; !ok {
-		t.Fatalf("short upstream ID missing from %#v", models)
+	// Verified-only mode hides every model outside the configured
+	// callable list, including the unverified default model.
+	if _, ok := byID["gpt-5.6-sol"]; ok {
+		t.Fatalf("unverified default model was advertised in %#v", models)
 	}
 	if _, ok := byID["openai/gpt-5.6-sol"]; ok {
 		t.Fatalf("full upstream ID was advertised in %#v", models)
 	}
 	if !byID["claude-sonnet-4.6"].FreeAccountCallable || !byID["public-model"].FreeAccountCallable {
 		t.Fatalf("verified models were not marked: %#v", byID)
-	}
-	if byID["gpt-5.6-sol"].FreeAccountCallable {
-		t.Fatalf("default model unexpectedly inherited free status: %#v", byID["gpt-5.6-sol"])
 	}
 	if got := gw.resolveModel("claude-sonnet-4.6"); got != "anthropic:anthropic/claude-sonnet-4.6" {
 		t.Fatalf("resolved short Claude model = %q", got)
