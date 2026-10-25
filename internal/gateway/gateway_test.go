@@ -172,7 +172,7 @@ func TestCompleteToolCallContinuationAndMetadataFallback(t *testing.T) {
 		t.Fatalf("agent settings = %#v", agent)
 	}
 	wantSystem := "top-level instruction\n\nsystem instruction\n\ndeveloper instruction\n\n" +
-		openai.IdentitySystemPrompt() + "\n\n" + strings.TrimSpace(openai.BuildToolSystemPrompt(tools))
+		openai.IdentitySystemPrompt() + "\n\n" + strings.TrimSpace(openai.BuildToolSystemPrompt(tools, openai.ToolChoiceAuto, ""))
 	if agent["systemMessage"] != wantSystem {
 		t.Fatalf("system message = %#v, want %#v", agent["systemMessage"], wantSystem)
 	}

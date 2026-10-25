@@ -663,7 +663,8 @@ func (g *Gateway) accountRequestSettings(
 	runnerModel string,
 	req openai.ChatRequest,
 ) (upstream.AgentSettings, upstream.FilteredEdgeTools) {
-	agent := g.agentSettings(runtime.Agent, runnerModel, req.System, req.Tools)
+	choice, forced := openai.ResolveToolChoice(req.ToolChoice, req.Tools)
+	agent := g.agentSettings(runtime.Agent, runnerModel, req.System, req.Tools, choice, forced)
 	filteredTools := runtime.EdgeTools
 	if len(req.Tools) > 0 {
 		filteredTools = nil
@@ -849,7 +850,7 @@ func enrichToolResultNames(msgs []openai.ChatMessage, todoID string, store *sess
 	return copyMessages
 }
 
-func (g *Gateway) agentSettings(template upstream.AgentSettings, model string, systemPrompt string, tools []openai.Tool) upstream.AgentSettings {
+func (g *Gateway) agentSettings(template upstream.AgentSettings, model string, systemPrompt string, tools []openai.Tool, toolChoice openai.ToolChoiceMode, forcedTool string) upstream.AgentSettings {
 	agent := template
 	agent.Model = model
 	agent.Name = "Client Agent"
@@ -858,7 +859,7 @@ func (g *Gateway) agentSettings(template upstream.AgentSettings, model string, s
 	agent.SystemMessageMode = "raw"
 	parts := []string{strings.TrimSpace(systemPrompt), openai.IdentitySystemPrompt()}
 	if len(tools) > 0 {
-		parts = append(parts, openai.BuildToolSystemPrompt(tools))
+		parts = append(parts, openai.BuildToolSystemPrompt(tools, toolChoice, forcedTool))
 	}
 	agent.SystemMessage = strings.Join(nonEmptyStrings(parts), "\n\n")
 

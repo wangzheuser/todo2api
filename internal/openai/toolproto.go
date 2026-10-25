@@ -45,6 +45,9 @@ type ToolCallStreamFilter struct {
 	alternateDecided bool
 	holdAlternate    bool
 	tools            []Tool
+	// consecutiveBlocks tracks whether the released prose ended directly in
+	// emitted blocks, so a multi-block parallel sequence keeps suppressing.
+	completedBlocks int
 }
 
 // NewToolCallStreamFilter creates a stream filter that can validate observed
@@ -84,9 +87,14 @@ func (f *ToolCallStreamFilter) Push(fragment string) string {
 			candidate := f.pending[:end]
 			_, calls := f.parse(candidate)
 			if len(calls) > 0 {
-				f.pending = ""
-				f.stopped = true
-				return out.String()
+				// Consume the valid block but keep filtering: the protocol
+				// allows consecutive blocks for parallel calls, so the next
+				// block must also be withheld. If the next output is not
+				// another block, the prose after it is released below.
+				f.completedBlocks++
+				f.pending = f.pending[end:]
+				f.inBlock = false
+				continue
 			}
 
 			// A closed but malformed block is ordinary model output.
@@ -102,6 +110,14 @@ func (f *ToolCallStreamFilter) Push(fragment string) string {
 			f.pending = f.pending[openAt:]
 			f.inBlock = true
 			continue
+		}
+
+		// After at least one valid block, contract-violating trailing prose
+		// (the agent must stop after requesting tools) is suppressed just
+		// like the non-streaming parser drops text after the first block.
+		if f.completedBlocks > 0 {
+			f.pending = ""
+			return out.String()
 		}
 
 		keep := possibleToolTagPrefix(f.pending)
@@ -125,6 +141,12 @@ func (f *ToolCallStreamFilter) Flush() string {
 		if _, calls := f.parse(pending); len(calls) > 0 {
 			return ""
 		}
+	}
+	// Text after a valid block is contract-violating trailing prose (the
+	// agent must stop after requesting tools) unless it opens another valid
+	// block; dropping it mirrors the non-streaming parser.
+	if f.completedBlocks > 0 && !strings.Contains(pending, toolOpenTag) {
+		return ""
 	}
 	return pending
 }
@@ -179,8 +201,9 @@ func IdentitySystemPrompt() string {
 
 // BuildToolSystemPrompt renders the client-executed tool contract injected as
 // a raw system message. Upstream device/cloud tools are also denied in
-// AgentSettings.
-func BuildToolSystemPrompt(tools []Tool) string {
+// AgentSettings. The choice mode tailors the final instruction the same way
+// the native Anthropic tool-use prompt varies by tool_choice.
+func BuildToolSystemPrompt(tools []Tool, choice ToolChoiceMode, forced string) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -192,27 +215,64 @@ func BuildToolSystemPrompt(tools []Tool) string {
 	b.WriteString("If the user explicitly asks for a listed tool, you must request it. ")
 	b.WriteString("Never announce, promise, or describe a tool use in prose: any intended tool use must be the TOOL_CALL block itself. ")
 	b.WriteString("Never output a bare JSON tool request, TOOL_CALL name=... arguments=..., tool_name(...) shorthand, or a simulated tool result. ")
-	b.WriteString("To use one, output exactly one block with no Markdown fence or surrounding prose:\n")
+	b.WriteString("To use one, output one or more blocks with no Markdown fence or surrounding prose:\n")
 	b.WriteString(toolOpenTag + "{\"name\":\"<tool>\",\"arguments\":{...}}" + toolCloseTag + "\n")
-	b.WriteString("Then stop immediately. The client will execute the call and return its result in the next turn. ")
+	b.WriteString("Then stop immediately. The client will execute the calls and return their results in the next turn. ")
 	b.WriteString("Only an explicit error result from that exact tool proves that the call failed; never infer a failure from the execution model. ")
 	b.WriteString("A capability catalog search with no match means only that the target is absent from that catalog and says nothing about other listed tools. ")
 	b.WriteString("When local inspection, command execution, file editing, screenshots, or verification are required and a matching tool is listed, request that tool instead of asking the user to perform the same operation. ")
 	b.WriteString("After receiving a result, either request one more tool in the same format or provide the final answer based only on real results. ")
 	b.WriteString("Never claim that you executed a tool whose result you have not received. ")
-	b.WriteString("Only provide a normal answer when no client-side tool is needed.\n\nTools:\n")
+	b.WriteString("Only provide a normal answer when no client-side tool is needed.\n\n")
+	b.WriteString("Examples of the exact format:\n")
+	b.WriteString("user: What is the weather in Paris?\n")
+	b.WriteString("assistant: " + toolOpenTag + "{\"name\":\"client_tool_0\",\"arguments\":{\"city\":\"Paris\"}}" + toolCloseTag + "\n\n")
+	b.WriteString("user: Read a.txt and b.txt\n")
+	b.WriteString("assistant: " + toolOpenTag + "{\"name\":\"client_tool_0\",\"arguments\":{\"path\":\"a.txt\"}}" + toolCloseTag + "\n")
+	b.WriteString(toolOpenTag + "{\"name\":\"client_tool_0\",\"arguments\":{\"path\":\"b.txt\"}}" + toolCloseTag + "\n")
+	b.WriteString("(Independent calls may be emitted as consecutive blocks; then stop.)\n\nTools:\n")
+	compact := len(tools) > compactToolCatalogThreshold
 	for i, t := range tools {
-		fmt.Fprintf(&b, "- %s: %s\n", clientToolAlias(i), t.Function.Description)
-		if len(t.Function.Parameters) > 0 {
+		description := t.Function.Description
+		if compact && len(description) > compactToolDescriptionLimit {
+			description = description[:compactToolDescriptionLimit] + "..."
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", clientToolAlias(i), description)
+		if !compact && len(t.Function.Parameters) > 0 {
 			fmt.Fprintf(&b, "  parameters (JSON schema): %s\n", string(t.Function.Parameters))
 		}
+	}
+	if compact {
+		b.WriteString("  (Many tools are available, so parameter JSON schemas are omitted above; keep arguments valid JSON matching the user request.)\n")
 	}
 	b.WriteString("\nFinal tool-call rule for this turn: the following client tool mappings are authoritative. ")
 	b.WriteString("When the user requests one of these tools, emit the matching block immediately and stop; do not answer that the tool is unavailable and do not mention hosting tools.\n")
 	for i, t := range tools {
 		fmt.Fprintf(&b, "- request %q => emit exactly <TOOL_CALL>{\"name\":\"%s\",\"arguments\":{...}}</TOOL_CALL>\n", t.Function.Name, clientToolAlias(i))
 	}
+	b.WriteString(toolChoiceInstruction(choice, forced))
 	return b.String()
+}
+
+const (
+	compactToolCatalogThreshold = 20
+	compactToolDescriptionLimit = 120
+)
+
+// toolChoiceInstruction returns the tool_choice-specific closing directive,
+// mirroring the tiers used in Anthropic's native tool-use prompts.
+func toolChoiceInstruction(choice ToolChoiceMode, forced string) string {
+	switch choice {
+	case ToolChoiceNone:
+		return "\nTool use is disabled for this turn: do not emit any TOOL_CALL block; answer in plain text.\n"
+	case ToolChoiceRequired:
+		return "\nThis turn requires a tool call: always emit at least one TOOL_CALL block. If any required parameter is missing, make your best guess from the request context; if no reasonable guess exists, fill the value with \"UNKNOWN\". Do not fill in optional parameters that were not specified. Do not answer in plain text this turn.\n"
+	case ToolChoiceForced:
+		return fmt.Sprintf(
+			"\nThis turn must call the tool %q: emit its TOOL_CALL block immediately and stop. If any required parameter is missing, make your best guess from the request context; if no reasonable guess exists, fill the value with \"UNKNOWN\".\n", forced)
+	default:
+		return "\nCheck that all required parameters for the chosen tool are provided or can reasonably be inferred from the request. If there are no relevant tools or required values are missing, ask the user for them instead of emitting a block. Do not use TOOL_CALL blocks unless you intend to invoke a tool.\n"
+	}
 }
 
 func clientToolAlias(index int) string {
@@ -248,9 +308,10 @@ func ScopeToolCallIDs(calls []ToolCall, scope string) []ToolCall {
 	return result
 }
 
-// ParseToolCalls extracts valid tool blocks from an assistant reply. Text after
-// the first valid block is intentionally discarded because the contract says
-// the agent must stop after requesting a tool.
+// ParseToolCalls extracts valid tool blocks from an assistant reply. Text
+// before the first valid block is kept as prose; everything from the first
+// valid block onward (including trailing text) is discarded because the
+// contract says the agent must stop after requesting tools.
 func ParseToolCalls(content string) (text string, calls []ToolCall) {
 	blocks := findToolBlocks(content)
 	firstStart := -1

@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -127,7 +128,7 @@ func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 			Description: "Read a local file",
 			Parameters:  json.RawMessage(`{"type":"object"}`),
 		},
-	}})
+	}}, ToolChoiceAuto, "")
 	for _, want := range []string{
 		"your actual available tools for this turn",
 		"available through a client-executed tool protocol",
@@ -152,6 +153,105 @@ func TestBuildToolSystemPromptIsStrict(t *testing.T) {
 	}
 	if strings.Contains(prompt, "read_file:") {
 		t.Fatalf("prompt exposes a collision-prone client tool name:\n%s", prompt)
+	}
+	for _, want := range []string{
+		"Examples of the exact format",
+		`{"name":"client_tool_0","arguments":{"city":"Paris"}`,
+		"Check that all required parameters",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("auto-mode prompt does not contain %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildToolSystemPromptToolChoiceTiers(t *testing.T) {
+	tools := []Tool{{Function: FunctionDecl{Name: "get_weather"}}}
+	required := BuildToolSystemPrompt(tools, ToolChoiceRequired, "")
+	if !strings.Contains(required, "requires a tool call") || !strings.Contains(required, `"UNKNOWN"`) {
+		t.Fatalf("required prompt = %s", required)
+	}
+	forced := BuildToolSystemPrompt(tools, ToolChoiceForced, "get_weather")
+	if !strings.Contains(forced, `must call the tool "get_weather"`) {
+		t.Fatalf("forced prompt = %s", forced)
+	}
+	none := BuildToolSystemPrompt(tools, ToolChoiceNone, "")
+	if !strings.Contains(none, "do not emit any TOOL_CALL block") {
+		t.Fatalf("none prompt = %s", none)
+	}
+}
+
+func TestBuildToolSystemPromptCompactCatalog(t *testing.T) {
+	tools := make([]Tool, 25)
+	for i := range tools {
+		tools[i] = Tool{Function: FunctionDecl{
+			Name:        fmt.Sprintf("tool_%d", i),
+			Description: strings.Repeat("d", 300),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}}}`),
+		}}
+	}
+	prompt := BuildToolSystemPrompt(tools, ToolChoiceAuto, "")
+	if strings.Contains(prompt, `"properties":{"a"`) {
+		t.Fatalf("compact catalog leaked a full schema:\n%s", prompt[len(prompt)-500:])
+	}
+	if !strings.Contains(prompt, "parameter JSON schemas are omitted") {
+		t.Fatalf("compact catalog explanation missing:\n%s", prompt[len(prompt)-300:])
+	}
+	if !strings.Contains(prompt, "d"+strings.Repeat("d", 117)+"...") {
+		t.Fatalf("compact description not truncated")
+	}
+}
+
+func TestResolveToolChoiceShapes(t *testing.T) {
+	tools := []Tool{{Function: FunctionDecl{Name: "get_weather"}}}
+	tests := []struct {
+		raw   string
+		mode  ToolChoiceMode
+		forced string
+	}{
+		{``, ToolChoiceAuto, ""},
+		{`"auto"`, ToolChoiceAuto, ""},
+		{`"none"`, ToolChoiceNone, ""},
+		{`"required"`, ToolChoiceRequired, ""},
+		{`"any"`, ToolChoiceRequired, ""},
+		{`{"type":"function","function":{"name":"get_weather"}}`, ToolChoiceForced, "get_weather"},
+		{`{"type":"function","function":{"name":"missing"}}`, ToolChoiceRequired, "missing"},
+		{`{"type":"auto"}`, ToolChoiceAuto, ""},
+		{`garbage`, ToolChoiceAuto, ""},
+	}
+	for _, tc := range tests {
+		mode, forced := ResolveToolChoice(json.RawMessage(tc.raw), tools)
+		if mode != tc.mode || forced != tc.forced {
+			t.Fatalf("ResolveToolChoice(%q) = (%d,%q), want (%d,%q)", tc.raw, mode, forced, tc.mode, tc.forced)
+		}
+	}
+}
+
+func TestParseToolCallsKeepsParallelBlocks(t *testing.T) {
+	content := "<TOOL_CALL>{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.txt\"}}</TOOL_CALL>" +
+		"<TOOL_CALL>{\"name\":\"read_file\",\"arguments\":{\"path\":\"b.txt\"}}</TOOL_CALL>"
+	_, calls := ParseToolCalls(content)
+	if len(calls) != 2 || calls[0].ID == calls[1].ID {
+		t.Fatalf("parallel calls = %#v", calls)
+	}
+}
+
+func TestToolCallStreamFilterSuppressesParallelBlocksAndTrailingProse(t *testing.T) {
+	var filter ToolCallStreamFilter
+	fragments := []string{
+		"<TOOL_CALL>{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.txt\"}}</TOOL_CALL>",
+		"<TOOL_CALL>{\"name\":\"read_file\",\"arguments\":{\"path\":\"b.txt\"}}</TOOL_CALL>",
+		"trailing prose that must not leak",
+	}
+	var got strings.Builder
+	for _, fragment := range fragments {
+		got.WriteString(filter.Push(fragment))
+	}
+	if tail := filter.Flush(); tail != "" {
+		t.Fatalf("flush leaked %q", tail)
+	}
+	if got.Len() != 0 {
+		t.Fatalf("streamed text = %q", got.String())
 	}
 }
 

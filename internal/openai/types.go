@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type ChatRequest struct {
@@ -12,8 +13,81 @@ type ChatRequest struct {
 	Stream        bool              `json:"stream"`
 	StreamOptions *StreamOptions    `json:"stream_options,omitempty"`
 	Tools         []Tool            `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage   `json:"tool_choice,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 	System        string            `json:"system,omitempty"` // Anthropic-style system parameter
+}
+
+// ToolChoiceMode classifies a client tool_choice directive for the text tool
+// protocol. Only the modes that change upstream behavior are distinguished.
+type ToolChoiceMode uint8
+
+const (
+	// ToolChoiceAuto is the default: the model decides whether to call a tool.
+	ToolChoiceAuto ToolChoiceMode = iota
+	// ToolChoiceNone suppresses tool use for this turn.
+	ToolChoiceNone
+	// ToolChoiceRequired forces a tool call this turn.
+	ToolChoiceRequired
+	// ToolChoiceForced names one specific tool that must be called.
+	ToolChoiceForced
+)
+
+// ResolveToolChoice classifies the raw OpenAI tool_choice value against the
+// declared tools. Unknown shapes fall back to auto rather than erroring.
+func ResolveToolChoice(raw json.RawMessage, tools []Tool) (ToolChoiceMode, string) {
+	if len(raw) == 0 {
+		return ToolChoiceAuto, ""
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	switch trimmed {
+	case "", "null", `"auto"`:
+		return ToolChoiceAuto, ""
+	case `"none"`:
+		return ToolChoiceNone, ""
+	case `"required"`, `"any"`, `"tool"`:
+		return ToolChoiceRequired, ""
+	}
+	if trimmed[0] == '"' {
+		// Some clients send {"type":"function","function":{"name":X}} as a bare
+		// string name; treat any quoted scalar as a forced tool name candidate.
+		var name string
+		if err := json.Unmarshal(raw, &name); err == nil {
+			for _, tool := range tools {
+				if tool.Function.Name == name {
+					return ToolChoiceForced, name
+				}
+			}
+		}
+		return ToolChoiceAuto, ""
+	}
+	var shaped struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &shaped); err != nil {
+		return ToolChoiceAuto, ""
+	}
+	switch shaped.Type {
+	case "none":
+		return ToolChoiceNone, ""
+	case "required", "any", "tool":
+		return ToolChoiceRequired, ""
+	case "function", "":
+		if shaped.Function.Name != "" {
+			for _, tool := range tools {
+				if tool.Function.Name == shaped.Function.Name {
+					return ToolChoiceForced, shaped.Function.Name
+				}
+			}
+			// A named tool that is not declared still means "must call a
+			// tool" for this turn rather than silently downgrading to auto.
+			return ToolChoiceRequired, shaped.Function.Name
+		}
+	}
+	return ToolChoiceAuto, ""
 }
 
 // AttachmentInput contains binary data extracted from a multimodal request.
